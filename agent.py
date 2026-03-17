@@ -1,0 +1,292 @@
+"""
+LangGraph Agent - 天氣搜索 + 計算工具
+
+這是一個使用 LangGraph 構建的 AI Agent，具備以下能力：
+1. 天氣搜索 - 獲取指定城市的天氣資訊
+2. 數學計算 - 執行數學運算
+3. 根據任務自主選擇合適的工具
+
+使用 LangGraph 的 ReAct 模式實現 Tool Calling
+"""
+
+import os
+from typing import TypedDict, Annotated, Sequence
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.tools import tool
+from langchain_ollama import ChatOllama
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+from langchain.globals import set_debug
+from langchain.callbacks.tracers import LangChainTracer
+from langchain.callbacks.manager import CallbackManager
+from dotenv import load_dotenv
+import json
+
+# 載入 .env 文件
+load_dotenv()
+
+# ============================================
+# LangSmith 配置 (用於調試)
+# ============================================
+# 1. 註冊 LangSmith: https://smith.langchain.com/
+# 2. 獲取 API Key
+# 3. 在 .env 文件中設置:
+#    LANGCHAIN_API_KEY=your_api_key
+#    LANGCHAIN_TRACING_V2=true
+#    LANGCHAIN_PROJECT=langgraph-agent-debug
+
+# 初始化 LangSmith Tracer
+_tracer = LangChainTracer()
+_callback_manager = CallbackManager([_tracer])
+
+# 可選：啟用 LangChain 調試模式
+# set_debug(True)
+
+# 檢查 LangSmith 是否正確配置
+if os.getenv("LANGCHAIN_API_KEY"):
+    print("=" * 60)
+    print("🔍 LangSmith 調試模式已啟用")
+    print("   查看追蹤: https://smith.langchain.com/")
+    print("=" * 60)
+    print()
+else:
+    print("=" * 60)
+    print("⚠️  LangSmith API Key 未設置")
+    print("   請在 .env 文件中設置:")
+    print("   LANGCHAIN_API_KEY=your_api_key")
+    print("   LANGCHAIN_TRACING_V2=true")
+    print("=" * 60)
+    print()
+
+
+# ============================================
+# 1. 定義工具 (Tools)
+# ============================================
+
+@tool
+def get_weather(city: str) -> str:
+    """
+    獲取指定城市的天氣資訊。
+
+    Args:
+        city: 城市名稱，例如 "台北"、"東京"、"紐約"
+
+    Returns:
+        天氣資訊字符串
+    """
+    # 模擬天氣數據（實際使用時可以接入天氣 API）
+    weather_data = {
+        "台北": "☀️ 天氣：晴朗，溫度 28°C，濕度 65%",
+        "東京": "🌧️ 天氣：多雲有小雨，溫度 18°C，濕度 80%",
+        "紐約": "🌤️ 天氣：局部多雲，溫度 15°C，濕度 55%",
+        "倫敦": "🌧️ 天氣：陰天有雨，溫度 12°C，濕度 85%",
+        "巴黎": "🌤️ 天氣：多雲，溫度 16°C，濕度 60%",
+        "悉尼": "☀️ 天氣：晴朗，溫度 24°C，濕度 50%",
+        "香港": "🌡️ 天氣：炎熱，溫度 30°C，濕度 75%",
+        "新加坡": "🌧️ 天氣：雷陣雨，溫度 32°C，濕度 90%",
+        "首爾": "🌤️ 天氣：晴朗，溫度 20°C，濕度 45%",
+        "上海": "🌧️ 天氣：多雲，溫度 22°C，濕度 70%",
+    }
+
+    return weather_data.get(city, f"抱歉，沒有找到 {city} 的天氣資訊")
+
+
+@tool
+def calculate(expression: str) -> str:
+    """
+    執行數學計算。
+
+    Args:
+        expression: 數學表達式，例如 "2 + 2", "10 * 5", "sqrt(16)"
+
+    Returns:
+        計算結果
+    """
+    try:
+        # 安全處理常見數學運算
+        expression = expression.replace("^", "**")
+
+        # 處理常見數學函數
+        allowed_names = {
+            "sqrt": "** 0.5",
+            "sin": "math.sin",
+            "cos": "math.cos",
+            "tan": "math.tan",
+            "log": "math.log",
+            "pi": "math.pi",
+            "e": "math.e",
+        }
+
+        # 檢查是否只包含安全的字符
+        safe_chars = set("0123456789+-*/.()** ")
+        if not all(c in safe_chars or c.isalnum() for c in expression):
+            return "錯誤：表達式包含不安全字符"
+
+        # 執行計算
+        import math
+        result = eval(expression, {"__builtins__": {}, "math": math}, allowed_names)
+        return f"計算結果：{expression} = {result}"
+    except Exception as e:
+        return f"計算錯誤：{str(e)}"
+
+
+# 工具列表
+tools = [get_weather, calculate]
+
+# 將 Tool 轉換為 ToolNode
+tool_node = ToolNode(tools)
+
+
+# ============================================
+# 2. 定義 Agent 狀態
+# ============================================
+
+class AgentState(TypedDict):
+    """Agent 的狀態類型"""
+    messages: Sequence[BaseMessage]
+    should_continue: bool
+
+
+# ============================================
+# 3. 定義 Agent 節點
+# ============================================
+
+def should_continue(state: AgentState) -> bool:
+    """
+    判斷是否應該繼續執行工具調用
+
+    Returns:
+        True 如果需要繼續（調用工具），False 如果結束
+    """
+    messages = state["messages"]
+    last_message = messages[-1]
+
+    # 如果最後一條消息有 tool_calls，說明模型請求調用工具
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        return True
+
+    return False
+
+
+def call_model(state: AgentState):
+    """
+    調用 LLM 模型
+    """
+    messages = state["messages"]
+
+    # 初始化 LLM - 添加 callback_manager 以啟用 LangSmith 追蹤
+    llm = ChatOllama(
+        model="gemma3:12b",
+        temperature=0.3,
+        callback_manager=_callback_manager,  # 啟用 LangSmith 追蹤
+    )
+
+    # 綁定工具
+    llm_with_tools = llm.bind_tools(tools)
+
+    # 調用模型
+    response = llm_with_tools.invoke(messages)
+
+    return {"messages": [response]}
+
+
+# ============================================
+# 4. 構建 LangGraph
+# ============================================
+
+def create_agent():
+    """
+    創建 LangGraph Agent
+
+    使用 ReAct 模式：
+    1. Model -> 決定是否調用工具
+    2. 如果需要調用工具 -> Tool Node
+    3. 工具執行後 -> 回到 Model
+    4. 如果不需要調用工具 -> 結束
+    """
+    # 創建狀態圖
+    workflow = StateGraph(AgentState)
+
+    # 添加節點
+    workflow.add_node("agent", call_model)
+    workflow.add_node("tools", tool_node)
+
+    # 設置入口點
+    workflow.set_entry_point("agent")
+
+    # 添加條件邊
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {
+            True: "tools",  # 繼續調用工具
+            END: END,       # 結束
+        }
+    )
+
+    # 工具執行後回到 agent
+    workflow.add_edge("tools", "agent")
+
+    # 編譯圖
+    return workflow.compile()
+
+
+# ============================================
+# 5. 主程式
+# ============================================
+
+def main():
+    """
+    主程式 - 演示 Agent 功能
+    """
+    print("=" * 60)
+    print("🚀 LangGraph Agent - 天氣搜索 + 計算工具")
+    print("=" * 60)
+    print()
+
+    # 創建 Agent
+    agent = create_agent()
+
+    # 測試案例
+    test_queries = [
+        #"台北現在的天氣如何？",
+        "請幫我計算 125 * 8 的結果",
+        "東京的天氣怎麼樣？",
+        "計算 (15 + 25) * 2",
+        "新加坡的天氣和溫度是多少？",
+    ]
+
+    for i, query in enumerate(test_queries, 1):
+        print(f"\n{'='*60}")
+        print(f"測試 {i}: {query}")
+        print("=" * 60)
+
+        # 創建初始消息
+        initial_state = {
+            "messages": [HumanMessage(content=query)],
+        }
+
+        # 執行 Agent (使用 LangSmith tracer)
+        try:
+            # 通過 config 傳遞 callback manager 給 LangGraph
+            config = {
+                "callbacks": [_tracer],
+                "configurable": {"thread_id": "test"}
+            }
+            result = agent.invoke(initial_state, config=config)
+
+            # 獲取最終回應
+            final_message = result["messages"][-1]
+            print(f"\n✅ Agent 回應:")
+            print(f"   {final_message.content}")
+
+        except Exception as e:
+            print(f"\n❌ 錯誤: {str(e)}")
+
+    print("\n" + "=" * 60)
+    print("✨ 測試完成！")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
