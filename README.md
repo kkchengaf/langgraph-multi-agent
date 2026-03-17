@@ -14,7 +14,7 @@
 - **LangGraph**: 狀態機、循環工作流
 - **LangChain**: Tool Calling
 - **ReAct 模式**: 推理 + 行動的混合模式
-- **Ollama**: 本地 LLM (gemma3:12b)
+- **Ollama**: 本地 LLM (qwen3.5:9b, gemma3:12b)
 
 ## 項目結構
 
@@ -36,7 +36,7 @@ source venv/bin/activate
 ollama serve
 
 # 下載模型（如果還沒有的話）
-ollama pull gemma3:12b
+ollama pull qwen3.5:9b
 ```
 
 ## 運行

@@ -9,16 +9,14 @@ LangGraph Agent - 天氣搜索 + 計算工具
 使用 LangGraph 的 ReAct 模式實現 Tool Calling
 """
 
+import operator
 import os
 from typing import TypedDict, Annotated, Sequence
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain.globals import set_debug
-from langchain.callbacks.tracers import LangChainTracer
-from langchain.callbacks.manager import CallbackManager
 from dotenv import load_dotenv
 import json
 
@@ -28,16 +26,10 @@ load_dotenv()
 # ============================================
 # LangSmith 配置 (用於調試)
 # ============================================
-# 1. 註冊 LangSmith: https://smith.langchain.com/
-# 2. 獲取 API Key
-# 3. 在 .env 文件中設置:
-#    LANGCHAIN_API_KEY=your_api_key
-#    LANGCHAIN_TRACING_V2=true
-#    LANGCHAIN_PROJECT=langgraph-agent-debug
-
-# 初始化 LangSmith Tracer
-_tracer = LangChainTracer()
-_callback_manager = CallbackManager([_tracer])
+# 只需要設置環境變量即可自動追蹤:
+# - LANGCHAIN_API_KEY
+# - LANGCHAIN_TRACING_V2=true
+# 查看追蹤: https://smith.langchain.com/
 
 # 可選：啟用 LangChain 調試模式
 # set_debug(True)
@@ -143,7 +135,7 @@ tool_node = ToolNode(tools)
 
 class AgentState(TypedDict):
     """Agent 的狀態類型"""
-    messages: Sequence[BaseMessage]
+    messages: Annotated[Sequence[BaseMessage], operator.add]
     should_continue: bool
 
 
@@ -173,12 +165,12 @@ def call_model(state: AgentState):
     調用 LLM 模型
     """
     messages = state["messages"]
+    #print(messages)
 
-    # 初始化 LLM - 添加 callback_manager 以啟用 LangSmith 追蹤
+    # 初始化 LLM
     llm = ChatOllama(
-        model="gemma3:12b",
+        model="qwen3.5:9b",#"gemma3:12b",
         temperature=0.3,
-        callback_manager=_callback_manager,  # 啟用 LangSmith 追蹤
     )
 
     # 綁定工具
@@ -219,8 +211,8 @@ def create_agent():
         "agent",
         should_continue,
         {
-            True: "tools",  # 繼續調用工具
-            END: END,       # 結束
+            True: "tools",   # 繼續調用工具
+            False: END,      # 結束 (添加False處理)
         }
     )
 
@@ -252,8 +244,8 @@ def main():
         #"台北現在的天氣如何？",
         "請幫我計算 125 * 8 的結果",
         "東京的天氣怎麼樣？",
-        "計算 (15 + 25) * 2",
-        "新加坡的天氣和溫度是多少？",
+        #"計算 (15 + 25) * 2",
+        #"新加坡的天氣和溫度是多少？",
     ]
 
     for i, query in enumerate(test_queries, 1):
@@ -263,17 +255,14 @@ def main():
 
         # 創建初始消息
         initial_state = {
-            "messages": [HumanMessage(content=query)],
+            "messages": [
+                HumanMessage(content=query)
+            ],
         }
 
-        # 執行 Agent (使用 LangSmith tracer)
+        # 執行 Agent
         try:
-            # 通過 config 傳遞 callback manager 給 LangGraph
-            config = {
-                "callbacks": [_tracer],
-                "configurable": {"thread_id": "test"}
-            }
-            result = agent.invoke(initial_state, config=config)
+            result = agent.invoke(initial_state)
 
             # 獲取最終回應
             final_message = result["messages"][-1]
