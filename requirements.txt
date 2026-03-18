@@ -7,3 +7,4 @@ ollama
 requests
 python-dotenv
 ddgs
+pytz

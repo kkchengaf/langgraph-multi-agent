@@ -33,6 +33,12 @@ DEEP_REASONING_SYSTEM_PROMPT = """你是一個專業的 AI 任務規劃師。你
 1. get_weather(city) - 獲取城市即時天氣資訊，city為城市名稱，例如 "Taipei"、"Tokyo"、"New York"
 2. calculate(expression) - 執行數學計算
 3. web_search(query) - 搜索互聯網獲取最新資訊
+4. get_current_time(timezone) - 獲取當前時間，timezone為時區例如 "UTC"、"Asia/Taipei"、"America/New_York"
+
+## 重要提醒：
+- 你必須知道「當前時間」，這對於回答時間相關的問題很重要
+- 如果用戶問「現在幾點」、「今天日期」等，必須先調用 get_current_time
+- 你沒有內建的時間知識，必須使用工具獲取
 
 ## 任務分解原則：
 1. 識別用戶的核心需求
@@ -225,7 +231,7 @@ def web_search(query: str) -> str:
         with DDGS() as ddgs:
             results = ddgs.text(
                 query, 
-                max_results=10
+                max_results=8
             )
             
         if not results:
@@ -250,8 +256,52 @@ def web_search(query: str) -> str:
         return f"搜索錯誤：{str(e)}"
 
 
+@tool
+def get_current_time(timezone: str = "UTC") -> str:
+    """
+    獲取當前時間。
+
+    Args:
+        timezone: 時區名稱，例如 "UTC", "Asia/Taipei", "America/New_York", "Europe/London"
+                 默認為 "UTC"
+
+    Returns:
+        格式化當前時間字符串
+    """
+    from datetime import datetime
+    import pytz
+    
+    try:
+        # 如果沒有指定時區，使用本地時間
+        if timezone == "UTC" or not timezone:
+            now = datetime.now()
+            tz = pytz.utc
+            timezone_str = "UTC"
+        else:
+            # 嘗試解析時區
+            try:
+                tz = pytz.timezone(timezone)
+                now = datetime.now(tz)
+                timezone_str = timezone
+            except pytz.exceptions.UnknownTimeZoneError:
+                # 如果時區無效，返回 UTC 時間
+                now = datetime.now(pytz.utc)
+                timezone_str = "UTC (invalid timezone, defaulted)"
+        
+        # 格式化輸出
+        return (
+            f"🕐 當前時間\n"
+            f"   時區: {timezone_str}\n"
+            f"   日期時間: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"   星期: {now.strftime('%A')}"
+        )
+        
+    except Exception as e:
+        return f"獲取時間錯誤：{str(e)}"
+
+
 # 工具列表
-tools = [get_weather, calculate, web_search]
+tools = [get_weather, calculate, web_search, get_current_time]
 
 # 將 Tool 轉換為 ToolNode
 tool_node = ToolNode(tools)
@@ -303,11 +353,17 @@ AGENT_SYSTEM_PROMPT = """你是一個專業的 AI 助手，擅長使用工具來
 1. **每次只調用一個工具**：不要一次請求多個工具，必須等工具返回結果後再決定下一步
 2. **按順序執行**：如果需要多個工具，請一個一個調用
 3. **使用推理**：在調用工具前，說明你的思考過程
+4. **時間意識**：你不知道當前時間，必須使用 get_current_time 工具獲取
 
 ## 可用工具：
-- get_weather(city) - 獲取城市天氣資訊
+- get_weather(city) - 獲取城市天氣資訊，例如 "Taipei"、"Tokyo"、"New York"
 - calculate(expression) - 執行數學計算  
-- web_search(query) - 搜索互聯網
+- web_search(query) - 搜索互聯網獲取最新資訊
+- get_current_time(timezone) - 獲取當前時間，timezone 可選如 "UTC"、"Asia/Taipei"、"America/New_York"
+
+## 時間相關問題：
+- 如果用戶問「現在幾點」、「今天幾號」、「現在是哪一年」等，必須先調用 get_current_time
+- 你沒有內建時間知識，必須使用工具
 
 ## 輸出格式：
 當你需要使用工具時：
@@ -461,7 +517,8 @@ def main():
         #"誰是現在的特斯拉CEO？",  # 測試網絡搜索
         #"比特幣現在多少錢？",    # 測試網絡搜索
         #"請幫我分析一下，未來一周台北的天氣趨勢如何？",  # 複雜任務，需要多次工具調用
-        "香港現在的天氣如何？幫我查一下附近有什麼合適的活動可以做？",  # 複雜任務，需要多次工具調用
+        #"香港現在的天氣如何？幫我查一下附近有什麼合適的活動可以做？",  # 複雜任務，需要多次工具調用
+        "66+43人民幣等於多少港元？",  # 複合任務：需要先計算人民幣金額，然後搜索當前匯率進行換算
     ]
 
     for i, query in enumerate(test_queries, 1):
