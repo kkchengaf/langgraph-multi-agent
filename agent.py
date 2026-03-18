@@ -25,6 +25,37 @@ import json
 load_dotenv()
 
 # ============================================
+# Deep Reasoning System Prompt
+# ============================================
+DEEP_REASONING_SYSTEM_PROMPT = """你是一個專業的 AI 任務規劃師。你的職責是分析用戶請求並將其分解為可執行的子任務。
+
+## 可用工具：
+1. get_weather(city) - 獲取城市即時天氣資訊，city為城市名稱，例如 "Taipei"、"Tokyo"、"New York"
+2. calculate(expression) - 執行數學計算
+3. web_search(query) - 搜索互聯網獲取最新資訊
+
+## 任務分解原則：
+1. 識別用戶的核心需求
+2. 判斷需要哪些工具來完成任務
+3. 確定任務的執行順序
+4. 預測可能的複雜情況
+
+## 輸出格式：
+請用以下格式回應：
+
+### 任務分析
+[對用戶請求的初步理解]
+
+### 所需工具
+- [工具1]: [原因]
+- [工具2]: [原因]
+
+### 執行計劃
+1. [第一步]
+2. [第二步]
+..."""
+
+# ============================================
 # LangSmith 配置 (用於調試)
 # ============================================
 # 只需要設置環境變量即可自動追蹤:
@@ -59,7 +90,7 @@ else:
 @tool
 def get_weather(city: str) -> str:
     """
-    獲取指定城市的天氣資訊。
+    獲取指定城市的即時天氣資訊。
 
     Args:
         city: 城市名稱，例如 "Taipei"、"Tokyo"、"New York"
@@ -262,24 +293,99 @@ def should_continue(state: AgentState) -> bool:
     return False
 
 
+# ============================================
+# Agent Node System Prompt - 限制一次只調用一個工具
+# ============================================
+AGENT_SYSTEM_PROMPT = """你是一個專業的 AI 助手，擅長使用工具來完成任務。
+
+## 重要規則：一次只能調用一個工具
+
+1. **每次只調用一個工具**：不要一次請求多個工具，必須等工具返回結果後再決定下一步
+2. **按順序執行**：如果需要多個工具，請一個一個調用
+3. **使用推理**：在調用工具前，說明你的思考過程
+
+## 可用工具：
+- get_weather(city) - 獲取城市天氣資訊
+- calculate(expression) - 執行數學計算  
+- web_search(query) - 搜索互聯網
+
+## 輸出格式：
+當你需要使用工具時：
+```
+Thought: [你的推理過程]
+Action: [工具名稱]
+Action Input: [輸入參數]
+```
+
+當你不需要使用工具時：
+```
+Thought: [你的推理過程]
+Final Answer: [你的最終回答]
+```
+"""
+
+
 def call_model(state: AgentState):
     """
-    調用 LLM 模型
+    調用 LLM 模型 (使用 system prompt 限制一次一個工具)
     """
     messages = state["messages"]
 
     # 初始化 LLM
     llm = ChatOllama(
-        model="qwen3.5:9b",#"gemma3:12b",
+        model="qwen3.5:9b",
         temperature=0.3,
     )
 
     # 綁定工具
     llm_with_tools = llm.bind_tools(tools)
 
-    # 調用模型
-    response = llm_with_tools.invoke(messages)
+    # 插入 system prompt 到消息開頭
+    full_messages = [
+        SystemMessage(content=AGENT_SYSTEM_PROMPT)
+    ] + list(messages)
 
+    # 調用模型
+    response = llm_with_tools.invoke(full_messages)
+
+    return {"messages": [response]}
+
+
+def deep_reasoning(state: AgentState):
+    """
+    Deep Reasoning 節點：分析任務並分解為子任務
+    
+    這個節點在主要 LLM 調用之前執行，
+    對用戶請求進行深度分析和任務規劃。
+    """
+    messages = state["messages"]
+    
+    # 獲取用戶最新的問題
+    user_query = None
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            user_query = msg.content
+            break
+    
+    if not user_query:
+        return {"messages": []}
+    
+    # 初始化 LLM (用於推理)
+    llm = ChatOllama(
+        model="qwen3.5:9b",
+        temperature=0.5,  # 較高的溫度以獲得更多樣化的推理
+    )
+    
+    # 構建推理 prompt
+    reasoning_prompt = [
+        SystemMessage(content=DEEP_REASONING_SYSTEM_PROMPT),
+        HumanMessage(content=f"請分析以下用戶請求：\n{user_query}")
+    ]
+    
+    # 調用 LLM 進行深度推理
+    response = llm.invoke(reasoning_prompt)
+    
+    # 返回推理結果作為一條 AI 消息
     return {"messages": [response]}
 
 
@@ -291,21 +397,26 @@ def create_agent():
     """
     創建 LangGraph Agent
 
-    使用 ReAct 模式：
-    1. Model -> 決定是否調用工具
-    2. 如果需要調用工具 -> Tool Node
-    3. 工具執行後 -> 回到 Model
-    4. 如果不需要調用工具 -> 結束
+    使用 ReAct 模式 + Deep Reasoning：
+    1. Deep Reasoning -> 分析任務並分解為子任務
+    2. Model -> 決定是否調用工具
+    3. 如果需要調用工具 -> Tool Node
+    4. 工具執行後 -> 回到 Model
+    5. 如果不需要調用工具 -> 結束
     """
     # 創建狀態圖
     workflow = StateGraph(AgentState)
 
     # 添加節點
+    workflow.add_node("reasoning", deep_reasoning)  # Deep Reasoning 節點
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", tool_node)
 
     # 設置入口點
-    workflow.set_entry_point("agent")
+    workflow.set_entry_point("reasoning")
+    
+    # Deep Reasoning 後進入 agent
+    workflow.add_edge("reasoning", "agent")
 
     # 添加條件邊
     workflow.add_conditional_edges(
@@ -313,7 +424,7 @@ def create_agent():
         should_continue,
         {
             True: "tools",   # 繼續調用工具
-            False: END,      # 結束 (添加False處理)
+            False: END,      # 結束
         }
     )
 
@@ -348,7 +459,9 @@ def main():
         #"計算 (15 + 25) * 2",
         #"新加坡的天氣和溫度是多少？",
         #"誰是現在的特斯拉CEO？",  # 測試網絡搜索
-        "比特幣現在多少錢？",    # 測試網絡搜索
+        #"比特幣現在多少錢？",    # 測試網絡搜索
+        #"請幫我分析一下，未來一周台北的天氣趨勢如何？",  # 複雜任務，需要多次工具調用
+        "香港現在的天氣如何？幫我查一下附近有什麼合適的活動可以做？",  # 複雜任務，需要多次工具調用
     ]
 
     for i, query in enumerate(test_queries, 1):
@@ -373,7 +486,14 @@ def main():
             for event in agent.stream(initial_state):
                 # event 是一個字典，包含節點名稱和輸出
                 for node_name, node_output in event.items():
-                    if node_name == "agent":
+                    if node_name == "reasoning":
+                        # Deep Reasoning 節點的輸出
+                        if "messages" in node_output:
+                            for msg in node_output["messages"]:
+                                if hasattr(msg, "content") and msg.content:
+                                    print(f"\n🧠 [Deep Reasoning]")
+                                    print(f"   {msg.content}")
+                    elif node_name == "agent":
                         # Agent 節點的輸出
                         if "messages" in node_output:
                             for msg in node_output["messages"]:
@@ -392,7 +512,7 @@ def main():
                                         print(f"   參數: {tool_args}")
                                 
                                 # 顯示 streaming 內容
-                                if hasattr(msg, "content") and msg.content:
+                                elif hasattr(msg, "content") and msg.content:
                                     print("\n" + "-" * 40)
                                     print(f"\n✅ Agent 回應:")
                                     print(f"   {msg.content}")                                    
