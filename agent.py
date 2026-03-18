@@ -62,26 +62,74 @@ def get_weather(city: str) -> str:
     獲取指定城市的天氣資訊。
 
     Args:
-        city: 城市名稱，例如 "台北"、"東京"、"紐約"
+        city: 城市名稱，例如 "Taipei"、"Tokyo"、"New York"
 
     Returns:
         天氣資訊字符串
     """
-    # 模擬天氣數據（實際使用時可以接入天氣 API）
-    weather_data = {
-        "台北": "☀️ 天氣：晴朗，溫度 28°C，濕度 65%",
-        "東京": "🌧️ 天氣：多雲有小雨，溫度 18°C，濕度 80%",
-        "紐約": "🌤️ 天氣：局部多雲，溫度 15°C，濕度 55%",
-        "倫敦": "🌧️ 天氣：陰天有雨，溫度 12°C，濕度 85%",
-        "巴黎": "🌤️ 天氣：多雲，溫度 16°C，濕度 60%",
-        "悉尼": "☀️ 天氣：晴朗，溫度 24°C，濕度 50%",
-        "香港": "🌡️ 天氣：炎熱，溫度 30°C，濕度 75%",
-        "新加坡": "🌧️ 天氣：雷陣雨，溫度 32°C，濕度 90%",
-        "首爾": "🌤️ 天氣：晴朗，溫度 20°C，濕度 45%",
-        "上海": "🌧️ 天氣：多雲，溫度 22°C，濕度 70%",
-    }
-
-    return weather_data.get(city, f"抱歉，沒有找到 {city} 的天氣資訊")
+    import requests
+    
+    api_key = os.getenv("OPEN_WEATHER_API_KEY")
+    if not api_key:
+        return "錯誤：未設置 OPEN_WEATHER_API_KEY 環境變量"
+    
+    try:
+        # OpenWeatherMap API
+        url = f"https://api.openweathermap.org/data/2.5/weather"
+        params = {
+            "q": city,
+            "appid": api_key,
+            "units": "metric"  # 使用攝氏度
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 404:
+            return f"抱歉，沒有找到 {city} 的天氣資訊"
+        elif response.status_code == 401:
+            return "錯誤：API Key 無效"
+        elif response.status_code != 200:
+            return f"錯誤：API 請求失敗 (狀態碼: {response.status_code})"
+        
+        data = response.json()
+        
+        # 解析天氣數據
+        weather = data["weather"][0]["description"]
+        temp = data["main"]["temp"]
+        humidity = data["main"]["humidity"]
+        feels_like = data["main"]["feels_like"]
+        wind_speed = data["wind"]["speed"]
+        city_name = data["name"]
+        
+        # 天氣圖標映射
+        weather_icons = {
+            "01d": "☀️", "01n": "🌙",
+            "02d": "⛅", "02n": "☁️",
+            "03d": "☁️", "03n": "☁️",
+            "04d": "☁️", "04n": "☁️",
+            "09d": "🌧️", "09n": "🌧️",
+            "10d": "🌧️", "10n": "🌧️",
+            "11d": "⛈️", "11n": "⛈️",
+            "13d": "❄️", "13n": "❄️",
+            "50d": "🌫️", "50n": "🌫️",
+        }
+        icon = data["weather"][0].get("icon", "")
+        icon_emoji = weather_icons.get(icon, "🌡️")
+        
+        return (
+            f"{icon_emoji} {city_name} 天氣資訊:\n"
+            f"   天氣：{weather}\n"
+            f"   溫度：{temp}°C (體感 {feels_like}°C)\n"
+            f"   濕度：{humidity}%\n"
+            f"   風速：{wind_speed} m/s"
+        )
+        
+    except requests.exceptions.Timeout:
+        return "錯誤：API 請求超時"
+    except requests.exceptions.RequestException as e:
+        return f"錯誤：網絡請求失敗 - {str(e)}"
+    except Exception as e:
+        return f"錯誤：{str(e)}"
 
 
 @tool
@@ -294,13 +342,13 @@ def main():
 
     # 測試案例
     test_queries = [
-        "台北現在的天氣如何？",
+        "香港現在的天氣如何？",
         "請幫我計算 125 * 8 的結果",
         #"東京的天氣怎麼樣？",
         #"計算 (15 + 25) * 2",
         #"新加坡的天氣和溫度是多少？",
-        "誰是現在的特斯拉CEO？",  # 測試網絡搜索
-        "比特幣現在多少錢？",    # 測試網絡搜索
+        #"誰是現在的特斯拉CEO？",  # 測試網絡搜索
+        #"比特幣現在多少錢？",    # 測試網絡搜索
     ]
 
     for i, query in enumerate(test_queries, 1):
