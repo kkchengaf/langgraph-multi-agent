@@ -342,13 +342,13 @@ def main():
 
     # 測試案例
     test_queries = [
-        "香港現在的天氣如何？",
-        "請幫我計算 125 * 8 的結果",
+        #"香港現在的天氣如何？",
+        #"請幫我計算 125 * 8 的結果",
         #"東京的天氣怎麼樣？",
         #"計算 (15 + 25) * 2",
         #"新加坡的天氣和溫度是多少？",
         #"誰是現在的特斯拉CEO？",  # 測試網絡搜索
-        #"比特幣現在多少錢？",    # 測試網絡搜索
+        "比特幣現在多少錢？",    # 測試網絡搜索
     ]
 
     for i, query in enumerate(test_queries, 1):
@@ -363,14 +363,52 @@ def main():
             ],
         }
 
-        # 執行 Agent
+        # 執行 Agent (使用 streaming)
         try:
-            result = agent.invoke(initial_state)
+            print("\n" + "-" * 40)
+            print("🔄 ReAct 推理過程:")
+            print("-" * 40)
+            
+            # 使用 streaming 模式
+            for event in agent.stream(initial_state):
+                # event 是一個字典，包含節點名稱和輸出
+                for node_name, node_output in event.items():
+                    if node_name == "agent":
+                        # Agent 節點的輸出
+                        if "messages" in node_output:
+                            for msg in node_output["messages"]:
+                                # 顯示 reasoning (tool calls)
+                                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                                    for tc in msg.tool_calls:
+                                        reasoning = tc.get("reasoning", "")
+                                        if reasoning:
+                                            print(f"\n💭 [Thought]")
+                                            print(f"   {reasoning}")
+                                        
+                                        tool_name = tc.get("name", "unknown")
+                                        tool_args = tc.get("args", {})
+                                        print(f"\n🔧 [Action]")
+                                        print(f"   工具: {tool_name}")
+                                        print(f"   參數: {tool_args}")
+                                
+                                # 顯示 streaming 內容
+                                if hasattr(msg, "content") and msg.content:
+                                    print("\n" + "-" * 40)
+                                    print(f"\n✅ Agent 回應:")
+                                    print(f"   {msg.content}")                                    
 
-            # 獲取最終回應
-            final_message = result["messages"][-1]
-            print(f"\n✅ Agent 回應:")
-            print(f"   {final_message.content}")
+                    
+                    elif node_name == "tools":
+                        # Tools 節點的輸出
+                        if "messages" in node_output:
+                            for msg in node_output["messages"]:
+                                from langchain_core.messages import ToolMessage
+                                if isinstance(msg, ToolMessage):
+                                    content = msg.content if len(msg.content) < 300 else msg.content[:300] + "..."
+                                    print(f"\n👁️ [Observation]")
+                                    print(f"   {content}")
+            
+            print("\n" + "-" * 40)
 
         except Exception as e:
             print(f"\n❌ 錯誤: {str(e)}")
