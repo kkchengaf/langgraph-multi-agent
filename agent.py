@@ -308,6 +308,219 @@ tool_node = ToolNode(tools)
 
 
 # ============================================
+# 輸出驗證層
+# ============================================
+def validate_and_parse_output(raw_output, has_tool_calls=False):
+    """
+    驗證和解析 LLM 輸出
+    
+    Args:
+        raw_output: LLM 原始輸出
+        has_tool_calls: 是否有 tool_calls（優先於 content 驗證）
+        
+    Returns:
+        驗證結果字典
+    """
+    # 如果有 tool_calls，直接通過驗證（這是有效的工具調用請求）
+    if has_tool_calls:
+        return {
+            "status": "valid",
+            "parsed": "工具調用請求"
+        }
+    
+    # 處理 None 或空輸出
+    if raw_output is None or (isinstance(raw_output, str) and raw_output.strip() == ""):
+        return {
+            "status": "empty", 
+            "retry": True, 
+            "fallback": "輸出為空，請繼續完成推理並提供有效回應"
+        }
+    
+    output_str = str(raw_output)
+    output_lower = output_str.lower()
+    
+    # 檢查是否為無數據情況
+    if "no data" in output_lower or "沒有找到" in output_str or "沒有結果" in output_str:
+        return {
+            "status": "no_data", 
+            "retry": True, 
+            "fallback": "搜索未找到結果，請如實告知用戶並嘗試建議不同的關鍵詞"
+        }
+    
+    # 檢查必需字段（Action 或 Final Answer）
+    has_action = "Action:" in output_str
+    has_final = "Final Answer:" in output_str
+    
+    if not has_action and not has_final:
+        return {
+            "status": "incomplete",
+            "retry": False,
+            "reason": "輸出缺少必要字段 (Action 或 Final Answer)",
+            "fallback": "請提供有效的 Action 或 Final Answer"
+        }
+    
+    # 驗證通過
+    return {
+        "status": "valid",
+        "parsed": output_str
+    }
+
+
+# ============================================
+# 智能重試與恢復機制
+# ============================================
+def agent_execute_with_retry(messages, llm, max_retries=3):
+    """
+    帶恢復機制的 Agent 執行
+    
+    Args:
+        messages: 對話消息列表
+        llm: LLM 實例
+        max_retries: 最大重試次數
+        
+    Returns:
+        LLM 響應
+    """
+    for attempt in range(max_retries):
+        try:
+            # 調用 LLM
+            response = llm.invoke(messages)
+            
+            # 獲取內容
+            raw_output = response.content if hasattr(response, 'content') else str(response)
+            
+            # 檢查是否有 tool_calls
+            has_tool_calls = hasattr(response, 'tool_calls') and response.tool_calls
+            
+            # 驗證輸出（傳入 tool_calls 信息）
+            validation = validate_and_parse_output(raw_output, has_tool_calls)
+            
+            if validation["status"] == "valid":
+                return response
+            
+            elif validation["status"] in ["empty", "no_data"]:
+                # 注入糾正提示
+                correction_msg = HumanMessage(
+                    content=f"""
+                    上一條輸出無效: {raw_output}
+
+                    {validation['fallback']}
+
+                    請重新生成，確保輸出完整且有效。
+                    """
+                )
+                messages = list(messages) + [response, correction_msg]
+                print(f"\n🔄 [重試 {attempt + 1}/{max_retries}] 注入糾正提示")
+            
+            elif validation["status"] == "incomplete":
+                # 不完整但可接受，返回響應讓流程繼續
+                print(f"\n⚠️ [警告] {validation['reason']}")
+                return response
+                
+        except Exception as e:
+            if attempt == max_retries - 1:
+                print(f"\n❌ [錯誤] 執行失敗: {str(e)}")
+                raise
+            print(f"\n🔄 [重試 {attempt + 1}/{max_retries}] 異常: {str(e)}")
+    
+    # 超過最大重試次數
+    print(f"\n❌ 超過最大重試次數 ({max_retries})")
+    return None
+
+
+# ============================================
+# 上下文滑動窗口
+# ============================================
+MAX_TOKENS = 4000  # 設定最大 token 限制
+
+
+def estimate_tokens(text):
+    """
+    簡單估計 token 數量 (中文字約每字 1.5 token，英文約每詞 1.3 token)
+    """
+    if not text:
+        return 0
+    # 粗略估計：中文 * 1.5 + 英文單詞 * 1.3
+    chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    english_words = len(text.split())
+    return int(chinese_chars * 1.5 + english_words * 1.3)
+
+
+def calculate_token_count(messages):
+    """
+    計算消息列表的總 token 數
+    """
+    total = 0
+    for msg in messages:
+        if hasattr(msg, 'content'):
+            total += estimate_tokens(msg.content)
+    return total
+
+
+def compress_message(msg):
+    """
+    壓縮單條消息，保留關鍵信息
+    """
+    if not hasattr(msg, 'content'):
+        return msg
+    
+    content = msg.content
+    # 如果消息包含工具結果，保留完整
+    if hasattr(msg, 'type') and msg.type == 'tool':
+        return msg
+    
+    # 如果是 AI 消息且太長，壓縮
+    if len(content) > 500:
+        # 保留開頭和結尾
+        compressed = content[:250] + "\n...[省略]...\n" + content[-200:]
+        # 創建新消息
+        from langchain_core.messages import AIMessage
+        return AIMessage(content=compressed)
+    return msg
+
+
+def manage_context_window(messages, max_tokens=MAX_TOKENS):
+    """
+    管理對話上下文，避免超出限制
+    
+    Args:
+        messages: 消息列表
+        max_tokens: 最大 token 限制
+        
+    Returns:
+        管理後的消息列表
+    """
+    if not messages:
+        return messages
+    
+    current_tokens = calculate_token_count(messages)
+    
+    if current_tokens <= max_tokens:
+        return messages
+    
+    print(f"\n📊 [上下文管理] 當前 {current_tokens} tokens，壓縮至 {max_tokens} tokens")
+    
+    # 保留：第一條（系統提示）+ 最後 N 條
+    # 壓縮：中間的歷史消息
+    
+    system_prompt = messages[0] if hasattr(messages[0], 'content') and "system" in str(type(messages[0])).lower() else None
+    
+    if system_prompt:
+        # 壓縮中間部分
+        compressed_history = []
+        for msg in messages[1:-5]:
+            compressed_history.append(compress_message(msg))
+        
+        # 保留最近 5 條
+        recent = messages[-5:]
+        
+        return [system_prompt] + compressed_history + recent
+    else:
+        # 沒有系統提示，直接保留最後 8 條
+        return messages[-8:]
+
+
+# ============================================
 # 2. 定義 Agent 狀態
 # ============================================
 
@@ -348,31 +561,39 @@ def should_continue(state: AgentState) -> bool:
 # ============================================
 AGENT_SYSTEM_PROMPT = """你是一個專業的 AI 助手，擅長使用工具來完成任務。
 
-## 執行流程：
-1. 閱讀 Deep Reasoning 的任務分析和執行計劃
-2. 按照計劃調用工具（一次一個）
-3. 獲得工具結果後，生成過渡回應或最終回答
-4. 如果任務完成，提供 Final Answer
-
 ## 可用工具：
 - get_weather(city) - 獲取城市天氣資訊，例如 "Taipei"、"Tokyo"、"New York"
 - calculate(expression) - 執行數學計算  
 - web_search(query) - 搜索互聯網獲取最新資訊
 - get_current_time(timezone) - 獲取當前時間，timezone 可選如 "UTC"、"Asia/Taipei"、"America/New_York"
 
-## 輸出格式：
-當你需要使用工具時：
+## 執行流程：
+
+1. 閱讀 Deep Reasoning 的任務分析和執行計劃
+
+2. 如果步驟需要調用工具，請使用以下格式調用工具（一次一個）；如果不需要，則跳到第 5 步：
+
 Action: [工具名稱]
 Action Input: [輸入參數]
+Thought: [解釋為什麼需要這個工具]
 
-當任務完成時：
-Final Answer: [你的最終回答]
+3. 獲得工具結果後，必須：
+   - 解釋工具返回的關鍵信息
+   - 明確説明下一步要做什麼
+   - 如果結果為空，説明原因並提供替代方案
+
+4. **步驟限制**：最多執行 5 次工具調用，超過後必須輸出最終結果
+
+5. 如果不需要繼續調用工具，生成最終回答：
+
+Final Answer: [完整且有價值的回答]
+
 """
 
 
 def call_model(state: AgentState):
     """
-    調用 LLM 模型 (使用 system prompt 限制一次一個工具)
+    調用 LLM 模型 (使用驗證、重試和上下文管理)
     """
     messages = state["messages"]
 
@@ -390,8 +611,16 @@ def call_model(state: AgentState):
         SystemMessage(content=AGENT_SYSTEM_PROMPT)
     ] + list(messages)
 
-    # 調用模型
-    response = llm_with_tools.invoke(full_messages)
+    # 管理上下文窗口（避免超限）
+    full_messages = manage_context_window(full_messages)
+
+    # 使用帶重試的機制執行
+    response = agent_execute_with_retry(full_messages, llm_with_tools, max_retries=3)
+    
+    if response is None:
+        # 返回錯誤訊息
+        from langchain_core.messages import AIMessage
+        return {"messages": [AIMessage(content="抱歉，處理過程中遇到問題，請嘗試更簡單的任務")]}
 
     return {"messages": [response]}
 
@@ -506,8 +735,8 @@ def main():
         #"誰是現在的特斯拉CEO？",  # 測試網絡搜索
         #"比特幣現在多少錢？",    # 測試網絡搜索
         #"請幫我分析一下，未來一周台北的天氣趨勢如何？",  # 複雜任務，需要多次工具調用
-        "香港現在的天氣如何？幫我查一下附近有什麼合適的活動可以做？",  # 複雜任務，需要多次工具調用
-        #"66+43人民幣等於多少港元？",  # 複合任務：需要先計算人民幣金額，然後搜索當前匯率進行換算
+        #"香港現在的天氣如何？幫我查一下附近有什麼合適的活動可以做？",  # 複雜任務，需要多次工具調用
+        "66+43人民幣等於多少港元？",  # 複合任務：需要先計算人民幣金額，然後搜索當前匯率進行換算
         #"請幫我查一下現在的時間"  # 複合任務：需要先獲取當前時間，然後使用 web_search 查詢倫敦當前時間
     ]
 
