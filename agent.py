@@ -348,12 +348,11 @@ def should_continue(state: AgentState) -> bool:
 # ============================================
 AGENT_SYSTEM_PROMPT = """你是一個專業的 AI 助手，擅長使用工具來完成任務。
 
-## 重要規則：一次只能調用一個工具
-
-1. **每次只調用一個工具**：不要一次請求多個工具，必須等工具返回結果後再決定下一步
-2. **按順序執行**：如果需要多個工具，請一個一個調用
-3. **使用推理**：在調用工具前，說明你的思考過程
-4. **時間意識**：你不知道當前時間，必須使用 get_current_time 工具獲取
+## 執行流程：
+1. 閱讀 Deep Reasoning 的任務分析和執行計劃
+2. 按照計劃調用工具（一次一個）
+3. 獲得工具結果後，生成過渡回應或最終回答
+4. 如果任務完成，提供 Final Answer
 
 ## 可用工具：
 - get_weather(city) - 獲取城市天氣資訊，例如 "Taipei"、"Tokyo"、"New York"
@@ -361,23 +360,13 @@ AGENT_SYSTEM_PROMPT = """你是一個專業的 AI 助手，擅長使用工具來
 - web_search(query) - 搜索互聯網獲取最新資訊
 - get_current_time(timezone) - 獲取當前時間，timezone 可選如 "UTC"、"Asia/Taipei"、"America/New_York"
 
-## 時間相關問題：
-- 如果用戶問「現在幾點」、「今天幾號」、「現在是哪一年」等，必須先調用 get_current_time
-- 你沒有內建時間知識，必須使用工具
-
 ## 輸出格式：
 當你需要使用工具時：
-```
-Thought: [你的推理過程]
 Action: [工具名稱]
 Action Input: [輸入參數]
-```
 
-當你不需要使用工具時：
-```
-Thought: [你的推理過程]
+當任務完成時：
 Final Answer: [你的最終回答]
-```
 """
 
 
@@ -517,8 +506,9 @@ def main():
         #"誰是現在的特斯拉CEO？",  # 測試網絡搜索
         #"比特幣現在多少錢？",    # 測試網絡搜索
         #"請幫我分析一下，未來一周台北的天氣趨勢如何？",  # 複雜任務，需要多次工具調用
-        #"香港現在的天氣如何？幫我查一下附近有什麼合適的活動可以做？",  # 複雜任務，需要多次工具調用
-        "66+43人民幣等於多少港元？",  # 複合任務：需要先計算人民幣金額，然後搜索當前匯率進行換算
+        "香港現在的天氣如何？幫我查一下附近有什麼合適的活動可以做？",  # 複雜任務，需要多次工具調用
+        #"66+43人民幣等於多少港元？",  # 複合任務：需要先計算人民幣金額，然後搜索當前匯率進行換算
+        #"請幫我查一下現在的時間"  # 複合任務：需要先獲取當前時間，然後使用 web_search 查詢倫敦當前時間
     ]
 
     for i, query in enumerate(test_queries, 1):
@@ -539,6 +529,8 @@ def main():
             print("🔄 ReAct 推理過程:")
             print("-" * 40)
             
+            all_messages = []
+            
             # 使用 streaming 模式
             for event in agent.stream(initial_state):
                 # event 是一個字典，包含節點名稱和輸出
@@ -547,6 +539,7 @@ def main():
                         # Deep Reasoning 節點的輸出
                         if "messages" in node_output:
                             for msg in node_output["messages"]:
+                                all_messages.append(msg)
                                 if hasattr(msg, "content") and msg.content:
                                     print(f"\n🧠 [Deep Reasoning]")
                                     print(f"   {msg.content}")
@@ -554,6 +547,7 @@ def main():
                         # Agent 節點的輸出
                         if "messages" in node_output:
                             for msg in node_output["messages"]:
+                                all_messages.append(msg)
                                 # 顯示 reasoning (tool calls)
                                 if hasattr(msg, "tool_calls") and msg.tool_calls:
                                     for tc in msg.tool_calls:
@@ -568,25 +562,41 @@ def main():
                                         print(f"   工具: {tool_name}")
                                         print(f"   參數: {tool_args}")
                                 
-                                # 顯示 streaming 內容
-                                elif hasattr(msg, "content") and msg.content:
-                                    print("\n" + "-" * 40)
-                                    print(f"\n✅ Agent 回應:")
-                                    print(f"   {msg.content}")                                    
+                                # 顯示 content (可能是中間回應或最終回應)
+                                if hasattr(msg, "content") and msg.content:
+                                    # 檢查是否包含 tool 調用結果的引用
+                                    if not (hasattr(msg, "tool_calls") and msg.tool_calls):
+                                        # 純 content，顯示為回應
+                                        print("\n" + "-" * 40)
+                                        print(f"\n✅ [Agent Response]")
+                                        print(f"   {msg.content}")                                    
 
                     
                     elif node_name == "tools":
                         # Tools 節點的輸出
                         if "messages" in node_output:
                             for msg in node_output["messages"]:
+                                all_messages.append(msg)
                                 from langchain_core.messages import ToolMessage
                                 if isinstance(msg, ToolMessage):
                                     content = msg.content if len(msg.content) < 300 else msg.content[:300] + "..."
                                     print(f"\n👁️ [Observation]")
                                     print(f"   {content}")
-            
+            """
             print("\n" + "-" * 40)
 
+            # 調試：顯示所有消息
+            print("\n📋 [Debug] 所有消息:")
+            for idx, m in enumerate(all_messages):
+                msg_type = type(m).__name__
+                if hasattr(m, "tool_calls") and m.tool_calls:
+                    print(f"  {idx}: {msg_type} - tool_calls: {[tc.get('name') for tc in m.tool_calls]}")
+                elif hasattr(m, "content") and m.content:
+                    content_preview = m.content[:100] + "..." if len(m.content) > 100 else m.content
+                    print(f"  {idx}: {msg_type} - {content_preview}")
+                else:
+                    print(f"  {idx}: {msg_type} - (empty)")
+            """
         except Exception as e:
             print(f"\n❌ 錯誤: {str(e)}")
 
