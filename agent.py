@@ -1,10 +1,11 @@
 """
-LangGraph Agent - 天氣搜索 + 計算工具
+LangGraph Agent - 天氣搜索 + 計算工具 + 網絡搜索
 
 這是一個使用 LangGraph 構建的 AI Agent，具備以下能力：
 1. 天氣搜索 - 獲取指定城市的天氣資訊
 2. 數學計算 - 執行數學運算
-3. 根據任務自主選擇合適的工具
+3. 網絡搜索 - 搜索互聯網獲取最新資訊
+4. 根據任務自主選擇合適的工具
 
 使用 LangGraph 的 ReAct 模式實現 Tool Calling
 """
@@ -122,8 +123,56 @@ def calculate(expression: str) -> str:
         return f"計算錯誤：{str(e)}"
 
 
+@tool
+def web_search(query: str) -> str:
+    """
+    搜索互聯網獲取最新資訊。
+    當用戶詢問天氣、計算以外的信息時使用，例如：
+    - 新聞時事
+    - 股票價格
+    - 運動比賽結果
+    - 最新技術資訊
+    - 任何實時信息
+
+    Args:
+        query: 搜索關鍵詞，例如 "2026年最新AI新聞"、"比特幣價格"
+
+    Returns:
+        搜索結果摘要
+    """
+    try:
+        from ddgs import DDGS
+        
+        with DDGS() as ddgs:
+            results = ddgs.text(
+                query, 
+                max_results=10
+            )
+            
+        if not results:
+            return f"沒有找到關於 '{query}' 的結果"
+        
+        # 格式化結果
+        formatted_results = []
+        for i, result in enumerate(results, 1):
+            title = result.get('title', 'No title')
+            href = result.get('href', '')
+            body = result.get('body', 'No description')
+            
+            formatted_results.append(
+                f"{i}. {title}\n"
+                f"   URL: {href}\n"
+                f"   摘要: {body[:200]}..." if len(body) > 200 else f"   摘要: {body}"
+            )
+        
+        return "搜索結果：\n\n" + "\n\n".join(formatted_results)
+        
+    except Exception as e:
+        return f"搜索錯誤：{str(e)}"
+
+
 # 工具列表
-tools = [get_weather, calculate]
+tools = [get_weather, calculate, web_search]
 
 # 將 Tool 轉換為 ToolNode
 tool_node = ToolNode(tools)
@@ -153,6 +202,11 @@ def should_continue(state: AgentState) -> bool:
     messages = state["messages"]
     last_message = messages[-1]
 
+    # 如果最後一條消息是 ToolMessage（工具執行結果），則需要再次調用 LLM 生成回應
+    from langchain_core.messages import ToolMessage
+    if isinstance(last_message, ToolMessage):
+        return True
+
     # 如果最後一條消息有 tool_calls，說明模型請求調用工具
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return True
@@ -165,7 +219,6 @@ def call_model(state: AgentState):
     調用 LLM 模型
     """
     messages = state["messages"]
-    #print(messages)
 
     # 初始化 LLM
     llm = ChatOllama(
@@ -232,7 +285,7 @@ def main():
     主程式 - 演示 Agent 功能
     """
     print("=" * 60)
-    print("🚀 LangGraph Agent - 天氣搜索 + 計算工具")
+    print("🚀 LangGraph Agent - 天氣搜索 + 計算工具 + 網絡搜索")
     print("=" * 60)
     print()
 
@@ -241,11 +294,13 @@ def main():
 
     # 測試案例
     test_queries = [
-        #"台北現在的天氣如何？",
+        "台北現在的天氣如何？",
         "請幫我計算 125 * 8 的結果",
-        "東京的天氣怎麼樣？",
+        #"東京的天氣怎麼樣？",
         #"計算 (15 + 25) * 2",
         #"新加坡的天氣和溫度是多少？",
+        "誰是現在的特斯拉CEO？",  # 測試網絡搜索
+        "比特幣現在多少錢？",    # 測試網絡搜索
     ]
 
     for i, query in enumerate(test_queries, 1):

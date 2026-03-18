@@ -6,3 +6,4 @@ langsmith
 ollama
 requests
 python-dotenv
+ddgs
