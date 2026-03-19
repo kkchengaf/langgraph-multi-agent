@@ -214,7 +214,8 @@ class ChatApp {
     
     // Add loading indicator
     this.isLoading = true;
-    this.addLoadingIndicator();
+    this.addLoadingIndicator();    
+    this.scrollToBottom(true);
     
     try {
       await sendChatMessage(
