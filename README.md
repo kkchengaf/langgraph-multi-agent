@@ -26,13 +26,20 @@
 ## 項目結構
 
 ```
-langgraph-agents/
-├── venv/              # 虛擬環境
-├── agent.py           # 主程式
-├── requirements.txt   # 依賴列表
-├── .env               # 環境變量 (需要自行創建)
-├── .env.example       # 環境變量模板
-└── README.md         # 說明文檔
+langgraph_agent/
+├── venv/                      # 虛擬環境
+├── src/                       # 源代码模块
+│   ├── __init__.py           # 模組初始化
+│   ├── tools.py              # 工具定义 (get_weather, calculate, web_search, get_current_time)
+│   ├── prompts.py            # 系統提示詞
+│   ├── utils.py              # 驗證、重試、上下文管理
+│   ├── nodes.py              # LangGraph 節點
+│   └── agent.py              # Agent 工廠
+├── agent.py                   # 主程式入口
+├── requirements.txt           # 依賴列表
+├── .env                      # 環境變量 (需要自行創建)
+├── .env.example              # 環境變量模板
+└── README.md                 # 說明文檔
 ```
 
 ## 安裝
@@ -89,6 +96,36 @@ python agent.py
    - 搜尋最新資訊、新聞、價格等
    - ⚠️ 搜尋結果取決於 DuckDuckGo 服務供應商
 
+4. **獲取時間** (`get_current_time`)
+   - 支援時區查詢
+   - 預設 UTC 時間
+
+## 模組說明
+
+### src/tools.py
+- `get_weather(city)`: 獲取城市天氣
+- `calculate(expression)`: 數學計算
+- `web_search(query)`: 網絡搜索
+- `get_current_time(timezone)`: 獲取時間
+
+### src/prompts.py
+- `AGENT_SYSTEM_PROMPT`: Agent 系統提示
+- `DEEP_REASONING_SYSTEM_PROMPT`: 深度推理提示
+
+### src/utils.py
+- `validate_and_parse_output()`: 輸出驗證
+- `agent_execute_with_retry()`: 智能重試
+- `manage_context_window()`: 上下文管理
+
+### src/nodes.py
+- `call_model()`: LLM 調用節點
+- `deep_reasoning()`: 深度推理節點
+- `should_continue()`: 條件邊判斷
+
+### src/agent.py
+- `create_agent()`: 創建 LangGraph Agent
+- `stream_agent_response()`: 流式輸出
+
 ## Agent 架構
 
 ### 節點說明
@@ -128,7 +165,7 @@ User Query
     ↓
     ├──────────┐
     ↓          ↓
-需要工具    結束
+ 需要工具    結束
     ↓
 ┌─────────────────────────────────────────┐
 │          Tools 節點                       │
@@ -144,10 +181,10 @@ User Query
 
 ```
 🚀 LangGraph Agent - 天氣搜索 + 計算工具 + 網絡搜索
-============================================================
+===========================================================
 
 測試 1: 香港現在的天氣如何？
-============================================================
+===========================================================
 
 🔄 ReAct 推理過程:
 ----------------------------------------
@@ -190,3 +227,4 @@ User Query
 4. **Deep Reasoning**: 任務分解與規劃
 5. **狀態管理**: 多輪對話的狀態保持
 6. **System Prompt**: 控制 LLM 行為
+7. **模組化設計**: 代碼組織與重用
