@@ -289,11 +289,11 @@ def create_agent(model: str = "qwen3.5:9b"):
 # LangGraph Agent streaming 服務
 # ============================================
 
-def stream_agent(
+async def stream_agent(
     message: str,
     model: str = "qwen3.5:9b",
     thread_id: str = "default"
-) -> Generator[str, None, None]:
+):
     """
     使用 LangGraph Agent 執行流式輸出
     
@@ -338,7 +338,7 @@ def stream_agent(
                                 yield json.dumps({
                                     "type": "reasoning",
                                     "content": content
-                                }) + "\n"
+                                })
                 
                 elif node_name == "agent":
                     # Agent 節點的輸出
@@ -357,7 +357,7 @@ def stream_agent(
                                         "tool": tool_name,
                                         "args": tool_args,
                                         "reasoning": reasoning
-                                    }) + "\n"
+                                    })
                             
                             # 顯示 content
                             if hasattr(msg, "content") and msg.content:
@@ -368,7 +368,7 @@ def stream_agent(
                                     yield json.dumps({
                                         "type": "final",
                                         "content": content
-                                    }) + "\n"
+                                    })
 
                 elif node_name == "tools":
                     # Tools 節點的輸出
@@ -382,13 +382,13 @@ def stream_agent(
                                     "type": "tool_result",
                                     "tool": tool_name,
                                     "result": content
-                                }) + "\n"
+                                })
 
     except Exception as e:
         yield json.dumps({
             "type": "error",
             "error": str(e)
-        }) + "\n"
+        })
     
     # 保存消息到上下文
     conversation_context.add_message(thread_id, HumanMessage(content=message))

@@ -219,7 +219,7 @@ async def stream_agent_sse(request: ChatRequest, model: str):
         SSE 事件
     """
     try:
-        for event in stream_agent(
+        async for event in stream_agent(
             message=request.message,
             model=model,
             thread_id=request.thread_id or "default"
