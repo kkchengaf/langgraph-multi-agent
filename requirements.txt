@@ -8,3 +8,7 @@ requests
 python-dotenv
 ddgs
 pytz
+fastapi
+uvicorn
+sse-starlette
+pydantic
