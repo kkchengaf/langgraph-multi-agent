@@ -10,9 +10,32 @@
  */
 export function formatMessage(content) {
   if (!content) return '';
-  return content
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
+  
+  let formatted = content;
+  //replace initial newlines
+  formatted = formatted.replace(/^\n+/, '');
+  
+  // Handle headings (### Heading -> <h4>Heading</h4>)
+  formatted = formatted.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+  formatted = formatted.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+  formatted = formatted.replace(/^# (.+)$/gm, '<h2>$1</h2>');
+  
+  // Handle bold text
+  formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Handle italic text
+  formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  // Handle inline code
+  formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
+  
+  // Handle multiple newlines (\n\n -> paragraph break)
+  formatted = formatted.replace(/\n\n+/g, '</p><p>');
+  
+  // Handle single newlines (but not in code blocks)
+  formatted = formatted.replace(/\n/g, '<br>');
+    
+  return formatted;
 }
 
 /**

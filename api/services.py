@@ -431,15 +431,16 @@ async def stream_agent(
     
     Yields:
         流式輸出事件
-    """
-    # Save user message to MongoDB
-    save_message_to_db(thread_id, "user", message)
-    
+    """    
     # Load messages from MongoDB if conversation context is empty
     history_messages = conversation_context.get_messages(thread_id)
     if not history_messages:
         # Context is empty (e.g., after server restart), load from DB
         history_messages = load_messages_from_db(thread_id)
+
+    # Save user message to MongoDB
+    # Save to database after loading history to avoid duplication in context
+    save_message_to_db(thread_id, "user", message)
     
     # 創建 Agent
     agent = create_agent(model)
