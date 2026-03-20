@@ -3,13 +3,14 @@
  * Chat application logic and event handling
  */
 
-import { sendChatMessage } from './api.js';
+import { sendChatMessage, getThreads, createThread, getThread, deleteThread } from './api.js';
 import { 
   createMessageElement, 
   createLoadingElement, 
   createWelcomeElement,
   createHeaderElement,
-  createInputElement 
+  createInputElement,
+  createThreadSidebarElement
 } from './components.js';
 
 /**
@@ -24,17 +25,25 @@ class ChatApp {
     this.isAtBottom = true;
     this.messageCount = 0;
     
+    // Thread management
+    this.threads = [];
+    this.currentThreadId = null;
+    
     // DOM Elements
     this.app = document.getElementById('app');
     this.chatContainer = null;
     this.chatMessages = null;
     this.inputElement = null;
     this.sendButton = null;
+    this.sidebarElement = null;
     
     // Bind methods
     this.handleSend = this.handleSend.bind(this);
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleScroll = this.handleScroll.bind(this);
+    this.handleThreadClick = this.handleThreadClick.bind(this);
+    this.handleNewChat = this.handleNewChat.bind(this);
+    this.handleThreadDelete = this.handleThreadDelete.bind(this);
     
     this.init();
   }
@@ -42,10 +51,136 @@ class ChatApp {
   /**
    * Initialize the application
    */
-  init() {
+  async init() {
     this.render();
     this.bindEvents();
+    await this.loadThreads();
     this.focusInput();
+  }
+  
+  /**
+   * Load threads from API
+   */
+  async loadThreads(loadMessages = true) {
+    try {
+      this.threads = await getThreads();
+      this.renderSidebar();
+      
+      // If there's a current thread, load its messages
+      if (this.currentThreadId && loadMessages) {
+        await this.loadThreadMessages(this.currentThreadId);
+      }
+    } catch (error) {
+      console.error('Error loading threads:', error);
+    }
+  }
+  
+  /**
+   * Load messages for a specific thread from DB
+   */
+  async loadThreadMessages(threadId) {
+    try {
+      const thread = await getThread(threadId);
+      this.messages = [];
+      
+      // Clear existing messages
+      if (this.chatMessages) {
+        this.chatMessages.innerHTML = '';
+      }
+      
+      // Add messages from thread
+      for (const msg of thread.messages) {
+        const msgObj = {
+          type: msg.role === 'user' ? 'user' : 'assistant',
+          content: msg.content
+        };
+        this.messages.push(msgObj);
+        this.appendMessage(msgObj, false);
+      }
+
+      this.renderSidebar(); // Update message counts in sidebar
+      
+    } catch (error) {
+      console.error('Error loading thread messages:', error);
+    }
+  }
+  
+  /**
+   * Create a new thread
+   */
+  async handleNewChat() {
+    try {
+      const thread = await createThread();
+      this.threads.unshift(thread);
+      this.currentThreadId = thread.id;
+      this.messages = [];
+      
+      // Clear chat
+      if (this.chatMessages) {
+        this.chatMessages.innerHTML = '';
+      }
+      
+      this.renderSidebar();
+    } catch (error) {
+      console.error('Error creating thread:', error);
+    }
+  }
+  
+  /**
+   * Handle thread click - switch to that thread and load its messages
+   */
+  async handleThreadClick(threadId) {
+    if (this.isLoading) return;
+    
+    this.currentThreadId = threadId;
+    await this.loadThreadMessages(threadId);
+  }
+  
+  /**
+   * Handle thread delete
+   */
+  async handleThreadDelete(threadId, event) {
+    event.stopPropagation();
+    
+    if (!confirm('Delete this chat?')) return;
+    
+    try {
+      await deleteThread(threadId);
+      
+      // Remove from local list
+      this.threads = this.threads.filter(t => t.id !== threadId);
+      
+      // If deleted current thread, switch to first available or create new
+      if (this.currentThreadId === threadId) {
+        if (this.threads.length > 0) {
+          this.currentThreadId = this.threads[0].id;
+          await this.loadThreadMessages(this.currentThreadId);
+        } else {
+          this.currentThreadId = null;
+          this.messages = [];
+          if (this.chatMessages) {
+            this.chatMessages.innerHTML = createWelcomeElement();
+          }
+        }
+      }
+      
+      this.renderSidebar();
+    } catch (error) {
+      console.error('Error deleting thread:', error);
+    }
+  }
+  
+  /**
+   * Render the sidebar
+   */
+  renderSidebar() {
+    if (!this.sidebarElement) return;
+    console.log("create new sidebar", this.currentThreadId, this.threads);
+    
+    this.sidebarElement.innerHTML = '';
+    const temp = document.createElement('div');
+    temp.innerHTML = createThreadSidebarElement(this.threads, this.currentThreadId);
+    this.sidebarElement.appendChild(temp.firstElementChild);
   }
   
   /**
@@ -54,9 +189,12 @@ class ChatApp {
   render() {
     this.app.innerHTML = `
       ${createHeaderElement()}
-      <div class="chat-container">
-        <div class="chat-messages">
-          ${createWelcomeElement()}
+      <div class="main-layout">
+        <div class="sidebar-container"></div>
+        <div class="chat-container">
+          <div class="chat-messages">
+            ${createWelcomeElement()}
+          </div>
         </div>
       </div>
       ${createInputElement(this.isLoading, this.totalTokens)}
@@ -65,8 +203,12 @@ class ChatApp {
     // Cache DOM references
     this.chatContainer = this.app.querySelector('.chat-container');
     this.chatMessages = this.app.querySelector('.chat-messages');
+    this.sidebarElement = this.app.querySelector('.sidebar-container');
     this.inputElement = this.app.querySelector('.chat-input');
     this.sendButton = this.app.querySelector('.send-button');
+    
+    // Render sidebar
+    this.renderSidebar();
     
     // Bind scroll handler
     this.chatContainer?.addEventListener('scroll', this.handleScroll);
@@ -84,15 +226,18 @@ class ChatApp {
   
   /**
    * Bind event listeners
+   * this function will be called multiple times, so we need to ensure we don't bind duplicate listeners for static elements like the chat messages container and sidebar. We can use a flag to track if we've already bound those events.
+   * For dynamic elements like the send button and input, we need to re-bind those every time we update the input area.
    */
-  bindEvents() {
+  bindEvents() {    
     this.sendButton?.addEventListener('click', this.handleSend);
     this.inputElement?.addEventListener('keydown', this.handleKeyDown);
     
-    // Event delegation for collapsible messages - only add once
-    if (!this.eventsBound && this.chatMessages) {
+    // Bind click events for chat messages and sidebar, but only once
+    if (!this.eventsBound) {
       this.eventsBound = true;
-      this.chatMessages.addEventListener('click', (e) => {
+
+      this.chatMessages?.addEventListener('click', (e) => {
         const toggleBtn = e.target.closest('.message-toggle');
         if (toggleBtn) {
           const messageEl = toggleBtn.closest('.message');
@@ -109,7 +254,33 @@ class ChatApp {
           }
         }
       });
-    }
+
+      this.sidebarElement?.addEventListener('click', (e) => {
+        // Handle new chat button
+        const newChatBtn = e.target.closest('.new-chat-btn');
+        if (newChatBtn) {
+          this.handleNewChat();
+          return;
+        }
+        
+        // Handle thread item click
+        const threadItem = e.target.closest('.thread-item');
+        if (threadItem && !e.target.closest('.thread-delete')) {
+          const threadId = threadItem.dataset.threadId;
+          this.handleThreadClick(threadId);
+          return;
+        }
+        
+        // Handle delete button
+        const deleteBtn = e.target.closest('.thread-delete');
+        if (deleteBtn) {
+          const threadId = deleteBtn.dataset.delete;
+          this.handleThreadDelete(threadId, e);
+          return;
+        }
+      });
+
+    }    
   }
   
   /**
@@ -205,6 +376,18 @@ class ChatApp {
    * Send a message to the API
    */
   async sendMessage(message) {
+    // Create new thread if none exists
+    if (!this.currentThreadId) {
+      try {
+        const thread = await createThread();
+        this.threads.unshift(thread);
+        this.currentThreadId = thread.id;
+        this.renderSidebar();
+      } catch (error) {
+        console.error('Error creating thread:', error);
+      }
+    }
+    
     // Clear input
     this.inputElement.value = '';
     
@@ -221,7 +404,7 @@ class ChatApp {
       await sendChatMessage(
         message,
         'qwen3.5:9b',
-        'default',
+        this.currentThreadId || 'default',
         (data) => {
           console.log('Received event:', data);
           this.handleStreamEvent(data);
@@ -244,6 +427,9 @@ class ChatApp {
       
       // Scroll to bottom (don't force)
       this.scrollToBottom();
+      
+      // Refresh threads to update message counts
+      await this.loadThreads(false);
     }
   }
   
