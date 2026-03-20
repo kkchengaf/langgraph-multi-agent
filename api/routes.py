@@ -2,10 +2,12 @@
 API 路由 - 定義所有 API 端點
 """
 import json
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
+import uuid
 
 from api.models import (
     ChatRequest,
@@ -14,7 +16,12 @@ from api.models import (
     ModelListResponse,
     OllamaModel,
     StreamChunk,
-    ErrorResponse
+    ErrorResponse,
+    ThreadCreate,
+    ThreadResponse,
+    ThreadMessageListResponse,
+    ThreadListResponse,
+    ThreadMessage
 )
 from api.services import (
     ollama_service,
@@ -23,6 +30,11 @@ from api.services import (
     stream_agent,
     get_token_info,
     conversation_context
+)
+from api.database import (
+    get_threads_collection,
+    get_messages_collection,
+    init_indexes
 )
 
 
@@ -319,3 +331,163 @@ async def get_current_model():
     return {
         "model": ollama_service.current_model
     }
+
+
+# ============================================
+# Thread API Endpoints
+# ============================================
+
+
+@router.post("/threads", response_model=ThreadResponse)
+async def create_thread(request: ThreadCreate):
+    """
+    Create a new thread
+    """
+    try:
+        threads = get_threads_collection()
+        
+        thread_id = str(uuid.uuid4())
+        now = datetime.utcnow()
+        
+        thread_doc = {
+            "_id": thread_id,
+            "name": request.name or f"Chat {now.strftime('%Y-%m-%d %H:%M')}",
+            "created_at": now,
+            "updated_at": now
+        }
+        
+        threads.insert_one(thread_doc)
+        
+        return ThreadResponse(
+            id=thread_id,
+            name=thread_doc["name"],
+            created_at=now.isoformat(),
+            updated_at=now.isoformat(),
+            message_count=0
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/threads", response_model=ThreadListResponse)
+async def list_threads():
+    """
+    Get all threads
+    """
+    try:
+        threads = get_threads_collection()
+        messages = get_messages_collection()
+        
+        thread_docs = list(threads.find().sort("updated_at", -1))
+        
+        thread_responses = []
+        for doc in thread_docs:
+            message_count = messages.count_documents({"thread_id": doc["_id"]})
+            thread_responses.append(ThreadResponse(
+                id=doc["_id"],
+                name=doc["name"],
+                created_at=doc["created_at"].isoformat() if hasattr(doc["created_at"], 'isoformat') else str(doc["created_at"]),
+                updated_at=doc["updated_at"].isoformat() if hasattr(doc["updated_at"], 'isoformat') else str(doc["updated_at"]),
+                message_count=message_count
+            ))
+        
+        return ThreadListResponse(
+            threads=thread_responses,
+            total=len(thread_responses)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/threads/{thread_id}", response_model=ThreadMessageListResponse)
+async def get_thread(thread_id: str):
+    """
+    Get a specific thread with messages
+    """
+    try:
+        threads = get_threads_collection()
+        messages = get_messages_collection()
+        
+        thread_doc = threads.find_one({"_id": thread_id})
+        if not thread_doc:
+            raise HTTPException(status_code=404, detail="Thread not found")
+        
+        message_docs = list(messages.find({"thread_id": thread_id}).sort("created_at", 1))
+        
+        thread_messages = []
+        for msg in message_docs:
+            thread_messages.append(ThreadMessage(
+                id=str(msg["_id"]),
+                role=msg.get("role", "user"),
+                content=msg.get("content", ""),
+                timestamp=msg["created_at"].isoformat() if hasattr(msg["created_at"], 'isoformat') else str(msg["created_at"])
+            ))
+        
+        return ThreadMessageListResponse(
+            id=thread_doc["_id"],
+            name=thread_doc["name"],
+            created_at=thread_doc["created_at"].isoformat() if hasattr(thread_doc["created_at"], 'isoformat') else str(thread_doc["created_at"]),
+            updated_at=thread_doc["updated_at"].isoformat() if hasattr(thread_doc["updated_at"], 'isoformat') else str(thread_doc["updated_at"]),
+            message_count=len(thread_messages),
+            messages=thread_messages
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/threads/{thread_id}")
+async def delete_thread(thread_id: str):
+    """
+    Delete a thread and its messages
+    """
+    try:
+        threads = get_threads_collection()
+        messages = get_messages_collection()
+        
+        # Delete thread
+        result = threads.delete_one({"_id": thread_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Thread not found")
+        
+        # Delete all messages in thread
+        messages.delete_many({"thread_id": thread_id})
+        
+        return {"status": "success", "message": "Thread deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/threads/{thread_id}", response_model=ThreadResponse)
+async def update_thread(thread_id: str, request: ThreadCreate):
+    """
+    Update thread name
+    """
+    try:
+        threads = get_threads_collection()
+        
+        now = datetime.utcnow()
+        result = threads.update_one(
+            {"_id": thread_id},
+            {"$set": {"name": request.name, "updated_at": now}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Thread not found")
+        
+        thread_doc = threads.find_one({"_id": thread_id})
+        
+        return ThreadResponse(
+            id=thread_id,
+            name=thread_doc["name"],
+            created_at=thread_doc["created_at"].isoformat() if hasattr(thread_doc["created_at"], 'isoformat') else str(thread_doc["created_at"]),
+            updated_at=thread_doc["updated_at"].isoformat() if hasattr(thread_doc["updated_at"], 'isoformat') else str(thread_doc["updated_at"]),
+            message_count=0
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

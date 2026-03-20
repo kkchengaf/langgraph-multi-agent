@@ -4,6 +4,7 @@
 import json
 import operator
 from typing import TypedDict, Annotated, Sequence, Optional, List, Dict, Any, Generator, AsyncGenerator
+from datetime import datetime
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.messages import BaseMessage
@@ -14,6 +15,7 @@ import requests
 from src.tools import TOOLS
 from src.prompts import AGENT_SYSTEM_PROMPT, DEEP_REASONING_SYSTEM_PROMPT
 from src.utils import estimate_tokens, calculate_token_count, manage_context_window, MAX_TOKENS, agent_execute_with_retry
+from api.database import get_threads_collection, get_messages_collection
 
 
 # ============================================
@@ -128,6 +130,42 @@ class ConversationContext:
 
 # 全域對話上下文實例
 conversation_context = ConversationContext()
+
+
+# ============================================
+# Message Saving Functions
+# ============================================
+
+
+def save_message_to_db(thread_id: str, role: str, content: str):
+    """
+    Save a message to MongoDB
+    
+    Args:
+        thread_id: Thread ID
+        role: Message role (user, assistant)
+        content: Message content
+    """
+    try:
+        messages = get_messages_collection()
+        threads = get_threads_collection()
+        
+        message_doc = {
+            "thread_id": thread_id,
+            "role": role,
+            "content": content,
+            "created_at": datetime.utcnow()
+        }
+        
+        messages.insert_one(message_doc)
+        
+        # Update thread's updated_at
+        threads.update_one(
+            {"_id": thread_id},
+            {"$set": {"updated_at": datetime.utcnow()}}
+        )
+    except Exception as e:
+        print(f"Error saving message to DB: {e}")
 
 
 # ============================================
@@ -305,6 +343,9 @@ async def stream_agent(
     Yields:
         流式輸出事件
     """
+    # Save user message to MongoDB
+    save_message_to_db(thread_id, "user", message)
+    
     # 創建 Agent
     agent = create_agent(model)
     
@@ -322,6 +363,7 @@ async def stream_agent(
     
     total_tokens = 0
     tool_call_count = 0
+    final_response = ""  # Accumulate final response
     
     try:
         # 使用 streaming 模式
@@ -365,6 +407,7 @@ async def stream_agent(
                                 # 檢查是否為最終答案 (沒有 tool_calls)
                                 if not (hasattr(msg, "tool_calls") and msg.tool_calls):
                                     total_tokens += estimate_tokens(content)
+                                    final_response += content  # Accumulate final response
                                     yield json.dumps({
                                         "type": "final",
                                         "content": content
@@ -392,8 +435,10 @@ async def stream_agent(
     
     # 保存消息到上下文
     conversation_context.add_message(thread_id, HumanMessage(content=message))
-    # Note: 在 streaming 過程中無法獲取完整的 AI 響應消息，
-    # 因為我們是逐步 yield 的。可以在會話結束後清理或保存關鍵信息。
+    
+    # Save assistant response to MongoDB
+    if final_response:
+        save_message_to_db(thread_id, "assistant", final_response)
     
     # 發送完成信號
     yield json.dumps({

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from api.routes import router
 from api.services import ollama_service
+from api.database import init_indexes, close_connection
 
 
 @asynccontextmanager
@@ -18,6 +19,14 @@ async def lifespan(app: FastAPI):
     print("\n" + "=" * 50)
     print("🚀 API Server 啟動中...")
     print("=" * 50)
+    
+    # 初始化 MongoDB
+    try:
+        init_indexes()
+        print("\n✅ MongoDB 連接成功!")
+    except Exception as e:
+        print(f"\n⚠️ 警告: 無法連接 MongoDB: {e}")
+        print("   請確保 MongoDB 服務正在運行")
     
     # 檢查 Ollama 連接
     try:
@@ -38,12 +47,19 @@ async def lifespan(app: FastAPI):
     print("   POST /chat/clear     - 清除對話上下文")
     print("   POST /model/set      - 設置默認模型")
     print("   GET  /model/current  - 獲取當前模型")
+    print("   Threads:")
+    print("   GET    /threads         - 列出所有線程")
+    print("   POST   /threads         - 創建新線程")
+    print("   GET    /threads/{id}   - 獲取線程詳情")
+    print("   PUT    /threads/{id}   - 更新線程名稱")
+    print("   DELETE /threads/{id}   - 刪除線程")
     print("=" * 50 + "\n")
     
     yield
     
     # 關閉時
     print("\n👋 API Server 關閉中...")
+    close_connection()
 
 
 # 創建 FastAPI 應用

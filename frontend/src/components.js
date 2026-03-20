@@ -213,3 +213,75 @@ export function createInputElement(isLoading = false, tokenCount = 0) {
     </div>
   `;
 }
+
+/**
+ * Format date for display
+ * @param {string} dateString - ISO date string
+ * @returns {string} - Formatted date
+ */
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diff = now - date;
+  
+  // Less than 1 minute
+  if (diff < 60000) {
+    return 'Just now';
+  }
+  // Less than 1 hour
+  if (diff < 3600000) {
+    const mins = Math.floor(diff / 60000);
+    return `${mins}m ago`;
+  }
+  // Less than 24 hours
+  if (diff < 86400000) {
+    const hours = Math.floor(diff / 3600000);
+    return `${hours}h ago`;
+  }
+  // Same year
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  // Different year
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/**
+ * Create thread sidebar element
+ * @param {Array} threads - List of threads
+ * @param {string} currentThreadId - Current active thread ID
+ * @returns {string} - HTML string
+ */
+export function createThreadSidebarElement(threads = [], currentThreadId = null) {
+  const threadsHtml = threads.map(thread => `
+    <div class="thread-item ${thread.id === currentThreadId ? 'active' : ''}" data-thread-id="${thread.id}">
+      <div class="thread-name">${escapeHtml(thread.name)}</div>
+      <div class="thread-meta">
+        <span class="thread-date">${formatDate(thread.updated_at)}</span>
+        <span class="thread-count">${thread.message_count} msgs</span>
+      </div>
+      <button class="thread-delete" data-delete="${thread.id}" title="Delete thread">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        </svg>
+      </button>
+    </div>
+  `).join('');
+  
+  return `
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Chats</h2>
+        <button class="new-chat-btn" title="New Chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="thread-list">
+        ${threadsHtml}
+        ${threads.length === 0 ? '<div class="no-threads">No chats yet</div>' : ''}
+      </div>
+    </aside>
+  `;
+}

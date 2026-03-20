@@ -78,3 +78,41 @@ class ErrorResponse(BaseModel):
     """錯誤響應"""
     error: str = Field(..., description="錯誤訊息")
     detail: Optional[str] = Field(None, description="詳細錯誤資訊")
+
+
+# ============================================
+# Thread Models
+# ============================================
+
+
+class ThreadMessage(BaseModel):
+    """Thread message model"""
+    id: Optional[str] = Field(None, description="Message ID")
+    role: str = Field(default="user", description="Message role: user, assistant, system")
+    content: str = Field(..., description="Message content")
+    timestamp: Optional[str] = Field(None, description="Timestamp")
+
+
+class ThreadCreate(BaseModel):
+    """Thread creation request"""
+    name: Optional[str] = Field(None, description="Thread name")
+
+
+class ThreadResponse(BaseModel):
+    """Thread response"""
+    id: str = Field(..., description="Thread ID")
+    name: str = Field(..., description="Thread name")
+    created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Last update timestamp")
+    message_count: int = Field(default=0, description="Number of messages")
+
+
+class ThreadMessageListResponse(ThreadResponse):
+    """Thread detail with messages"""
+    messages: List[ThreadMessage] = Field(default_factory=list, description="Messages")
+
+
+class ThreadListResponse(BaseModel):
+    """Thread list response"""
+    threads: List[ThreadResponse] = Field(..., description="Thread list")
+    total: int = Field(..., description="Total count")

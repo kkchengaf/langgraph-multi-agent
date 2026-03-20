@@ -121,3 +121,86 @@ export async function clearConversation(threadId = 'default') {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 }
+
+// ============================================
+// Thread API Functions
+// ============================================
+
+/**
+ * Get all threads
+ * @returns {Promise<Array>}
+ */
+export async function getThreads() {
+  const response = await fetch(`${API_BASE}/threads`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.threads || [];
+}
+
+/**
+ * Create a new thread
+ * @param {string} name - Thread name (optional)
+ * @returns {Promise<Object>}
+ */
+export async function createThread(name = null) {
+  const response = await fetch(`${API_BASE}/threads`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ name })
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * Get a specific thread with messages
+ * @param {string} threadId - Thread ID
+ * @returns {Promise<Object>}
+ */
+export async function getThread(threadId) {
+  const response = await fetch(`${API_BASE}/threads/${threadId}`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * Delete a thread
+ * @param {string} threadId - Thread ID
+ * @returns {Promise<void>}
+ */
+export async function deleteThread(threadId) {
+  const response = await fetch(`${API_BASE}/threads/${threadId}`, {
+    method: 'DELETE'
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+}
+
+/**
+ * Update thread name
+ * @param {string} threadId - Thread ID
+ * @param {string} name - New thread name
+ * @returns {Promise<Object>}
+ */
+export async function updateThread(threadId, name) {
+  const response = await fetch(`${API_BASE}/threads/${threadId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ name })
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
