@@ -220,9 +220,7 @@ export function createInputElement(isLoading = false, tokenCount = 0) {
  * @returns {string} - Formatted date
  */
 function formatDate(dateString) {
-  // Parse the date string - handle both ISO format with Z and without
-  console.log(dateString);
-  
+  // Parse the date string - handle both ISO format with Z and without  
   let date;
   if (dateString) {
     // UTC timestamp - parse and convert to local

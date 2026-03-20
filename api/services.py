@@ -168,6 +168,40 @@ def save_message_to_db(thread_id: str, role: str, content: str):
         print(f"Error saving message to DB: {e}")
 
 
+def load_messages_from_db(thread_id: str):
+    """
+    Load messages from MongoDB and populate conversation context
+    
+    Args:
+        thread_id: Thread ID
+        
+    Returns:
+        List of messages loaded
+    """
+    try:
+        messages = get_messages_collection()
+        
+        # Get messages for this thread, sorted by creation time
+        cursor = messages.find({"thread_id": thread_id}).sort("created_at", 1)
+        
+        loaded_messages = []
+        for doc in cursor:
+            if doc.get("role") == "user":
+                loaded_messages.append(HumanMessage(content=doc.get("content", "")))            
+            #elif doc.get("role") == "assistant":
+            #    loaded_messages.append(AIMessage(content=doc.get("content", "")))
+        
+        # Populate conversation context with loaded messages
+        if loaded_messages:
+            conversation_context._sessions[thread_id] = loaded_messages
+            print(f"Loaded {len(loaded_messages)} messages from DB for thread {thread_id}")
+        
+        return loaded_messages
+    except Exception as e:
+        print(f"Error loading messages from DB: {e}")
+        return []
+
+
 # ============================================
 # LangGraph Agent
 # ============================================
@@ -401,11 +435,14 @@ async def stream_agent(
     # Save user message to MongoDB
     save_message_to_db(thread_id, "user", message)
     
+    # Load messages from MongoDB if conversation context is empty
+    history_messages = conversation_context.get_messages(thread_id)
+    if not history_messages:
+        # Context is empty (e.g., after server restart), load from DB
+        history_messages = load_messages_from_db(thread_id)
+    
     # 創建 Agent
     agent = create_agent(model)
-    
-    # 獲取會話歷史消息（用於上下文）
-    history_messages = conversation_context.get_messages(thread_id)
     
     # 構建初始狀態
     # 將歷史消息與新消息結合
