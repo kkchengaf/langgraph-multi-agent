@@ -220,7 +220,22 @@ export function createInputElement(isLoading = false, tokenCount = 0) {
  * @returns {string} - Formatted date
  */
 function formatDate(dateString) {
-  const date = new Date(dateString);
+  // Parse the date string - handle both ISO format with Z and without
+  console.log(dateString);
+  
+  let date;
+  if (dateString) {
+    // UTC timestamp - parse and convert to local
+    date = new Date(dateString+"Z");
+  } else {
+    return 'Unknown';
+  }
+  
+  // Check if date is valid
+  if (isNaN(date.getTime())) {
+    return 'Invalid date';
+  }
+  
   const now = new Date();
   const diff = now - date;
   
@@ -238,7 +253,7 @@ function formatDate(dateString) {
     const hours = Math.floor(diff / 3600000);
     return `${hours}h ago`;
   }
-  // Same year
+  // Same year - show local date
   if (date.getFullYear() === now.getFullYear()) {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
