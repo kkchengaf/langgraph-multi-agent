@@ -13,7 +13,7 @@ from langgraph.prebuilt import ToolNode
 import requests
 
 from src.tools import TOOLS
-from src.prompts import AGENT_SYSTEM_PROMPT, DEEP_REASONING_SYSTEM_PROMPT
+from src.prompts import AGENT_SYSTEM_PROMPT, DEEP_REASONING_SYSTEM_PROMPT, DEEP_REASONING_WITH_HISTORY_PROMPT
 from src.utils import estimate_tokens, calculate_token_count, manage_context_window, MAX_TOKENS, agent_execute_with_retry
 from api.database import get_threads_collection, get_messages_collection
 
@@ -236,12 +236,16 @@ def call_model(state: AgentState, model: str = "qwen3.5:9b"):
     return {"messages": [response]}
 
 
-def deep_reasoning(state: AgentState, model: str = "qwen3.5:9b"):
+def deep_reasoning(state: AgentState, model: str = "qwen3.5:9b", max_retries: int = 3, min_response_length: int = 20):
     """
     Deep Reasoning 節點：分析任務並分解為子任務
     
     這個節點在主要 LLM 調用之前執行，
     對用戶請求進行深度分析和任務規劃。
+    
+    包含：
+    - 用戶對話歷史分析
+    - 重試機制避免空響應
     """
     messages = state["messages"]
     
@@ -255,23 +259,74 @@ def deep_reasoning(state: AgentState, model: str = "qwen3.5:9b"):
     if not user_query:
         return {"messages": []}
     
+    # 提取對話歷史中的用戶消息
+    user_history = []
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            if msg.content != user_query:  # 排除當前消息
+                user_history.append(msg.content)
+    
     # 初始化 LLM (用於推理)
     llm = ChatOllama(
         model=model,
         temperature=0.5,  # 較高的溫度以獲得更多樣化的推理
     )
     
+    # 根據是否有歷史選擇不同的 prompt
+    if user_history:
+        # 有歷史，使用增強版 prompt
+        history_text = "\n".join([f"- Q{i+1}: {q}" for i, q in enumerate(user_history[-5:])])  # 只取最近5條
+        user_content = f"""## 對話歷史（最近5輪）：
+{history_text}
+
+## 當前用戶請求：
+{user_query}"""
+        system_prompt = DEEP_REASONING_WITH_HISTORY_PROMPT
+    else:
+        # 無歷史，使用標準 prompt
+        user_content = f"請分析以下用戶請求：\n{user_query}"
+        system_prompt = DEEP_REASONING_SYSTEM_PROMPT
+    
     # 構建推理 prompt
     reasoning_prompt = [
-        SystemMessage(content=DEEP_REASONING_SYSTEM_PROMPT),
-        HumanMessage(content=f"請分析以下用戶請求：\n{user_query}")
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_content)
     ]
     
-    # 調用 LLM 進行深度推理
-    response = llm.invoke(reasoning_prompt)
+    # 重試機制
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            # 調用 LLM 進行深度推理
+            response = llm.invoke(reasoning_prompt)
+            
+            # 檢查響應是否有效
+            response_content = ""
+            if hasattr(response, 'content'):
+                response_content = response.content
+            elif isinstance(response, str):
+                response_content = response
+            
+            # 檢查響應是否為空或太短
+            if response_content and len(response_content.strip()) >= min_response_length:
+                return {"messages": [response]}
+            else:
+                # 響應太短，準備重試
+                last_error = f"Response too short: {len(response_content)} chars"
+                if attempt < max_retries - 1:
+                    # 添加額外提示要求更詳細的回覆
+                    reasoning_prompt.append(
+                        HumanMessage(content="你的回覆太簡短了，請提供更詳細的分析，包括任務分析、所需工具和執行計劃。")
+                    )
+                    
+        except Exception as e:
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                continue
     
-    # 返回推理結果作為一條 AI 消息
-    return {"messages": [response]}
+    # 所有重試都失敗了
+    error_message = f"[推理失敗: {last_error}] 用戶請求: {user_query}"
+    return {"messages": [AIMessage(content=error_message)]}
 
 
 def create_agent(model: str = "qwen3.5:9b"):
