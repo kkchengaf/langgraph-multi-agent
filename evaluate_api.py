@@ -55,6 +55,12 @@ TEST_CASES = [
     # Calculation queries
     {
         "category": "calculation",
+        "query": "What is the square root of 144?",
+        "expected_tools": ["calculate"],
+        "expected_keywords": ["12", "sqrt", "根號"],
+    },
+    {
+        "category": "calculation",
         "query": "Calculate 123 * 456",
         "expected_tools": ["calculate"],
         "expected_keywords": ["56088", "123*456"],
@@ -64,12 +70,6 @@ TEST_CASES = [
         "query": "請幫我計算 66 + 43",
         "expected_tools": ["calculate"],
         "expected_keywords": ["109", "66+43", "計算"],
-    },
-    {
-        "category": "calculation",
-        "query": "What is the square root of 144?",
-        "expected_tools": ["calculate"],
-        "expected_keywords": ["12", "sqrt", "根號"],
     },
     {
         "category": "calculation",

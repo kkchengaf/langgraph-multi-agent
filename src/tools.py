@@ -97,14 +97,15 @@ def calculate(expression: str) -> str:
         expression = expression.replace("^", "**")
 
         # 處理常見數學函數
+        import math
         allowed_names = {
-            "sqrt": "** 0.5",
-            "sin": "math.sin",
-            "cos": "math.cos",
-            "tan": "math.tan",
-            "log": "math.log",
-            "pi": "math.pi",
-            "e": "math.e",
+            "sqrt": lambda x: x ** 0.5,
+            "sin": math.sin,
+            "cos": math.cos,
+            "tan": math.tan,
+            "log": math.log,
+            "pi": math.pi,
+            "e": math.e,
         }
 
         # 檢查是否只包含安全的字符
