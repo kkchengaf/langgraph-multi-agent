@@ -112,8 +112,17 @@ class ConversationContext:
     
     def clear_session(self, thread_id: str) -> None:
         """清除會話"""
+        # Clear in-memory session
         if thread_id in self._sessions:
             del self._sessions[thread_id]
+        
+        # Also clear MongoDB messages
+        try:
+            from api.database import get_messages_collection
+            messages = get_messages_collection()
+            messages.delete_many({"thread_id": thread_id})
+        except Exception:
+            pass  # Ignore if MongoDB not available
     
     def get_token_count(self, thread_id: str) -> int:
         """獲取會話的 token 數"""

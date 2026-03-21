@@ -44,6 +44,20 @@ def validate_and_parse_output(raw_output, has_tool_calls=False):
             "fallback": "搜索未找到結果，請如實告知用戶並嘗試建議不同的關鍵詞"
         }
     
+    # 檢測是否在 content 中提到 Action: 但沒有實際 tool_calls
+    import re
+    # 匹配 Action: tool_name 格式
+    action_match = re.search(r'Action:\s*(\w+)', output_str, re.IGNORECASE)
+    
+    if action_match and not has_tool_calls:
+        tool_name = action_match.group(1)
+        return {
+            "status": "missing_tool_call",
+            "retry": True,
+            "reason": f"content 中提到 Action: {tool_name} 但沒有實際 tool_calls",
+            "fallback": "請使用 tool_calls 格式實際調用工具，而不是只在 content 中描述"
+        }
+    
     # 檢查必需字段
     has_action = "Action:" in output_str
     has_final = "Final Answer:" in output_str
@@ -93,7 +107,7 @@ def agent_execute_with_retry(messages, llm, max_retries=3):
             if validation["status"] == "valid":
                 return response
             
-            elif validation["status"] in ["empty", "no_data"]:
+            elif validation["status"] in ["empty", "no_data", "missing_tool_call"]:
                 # 注入糾正提示
                 correction_msg = HumanMessage(
                     content=f"""
