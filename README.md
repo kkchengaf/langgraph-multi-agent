@@ -1,6 +1,6 @@
-# LangGraph Agents Project
+# LangGraph Agent Project
 
-第三個作業：Week 6 - LangGraph Agents
+AI Agent System with LangGraph, FastAPI Backend, and Vue.js Frontend
 
 ## 目標
 
@@ -10,141 +10,133 @@
 - 網絡搜索 (使用 DuckDuckGo)
 - 根據任務自主選擇工具
 - Deep Reasoning (任務分解)
+- 評估系統 (Evaluation)
 
 ## 技術棧
 
 - **LangGraph**: 狀態機、循環工作流
 - **LangChain**: Tool Calling
-- **ReAct 模式**: 推理 + 行動的混合模式
+- **FastAPI**: REST API 伺服器
+- **MongoDB**: 訊息與執行緒持久化
 - **Ollama**: 本地 LLM (qwen3.5:9b)
-
-## 模型說明
-
-- **qwen3.5:9b**: 預設模型，支援 Tool Calling 和 Reasoning
-- **gemma3:12b**: 不支援 Tool Calling，僅用於基本對話
 
 ## 項目結構
 
 ```
 langgraph_agent/
-├── venv/                      # 虛擬環境
-├── src/                       # 源代码模块
-│   ├── __init__.py           # 模組初始化
-│   ├── tools.py              # 工具定义 (get_weather, calculate, web_search, get_current_time)
+├── src/                       # LangGraph 核心模組
+│   ├── __init__.py
+│   ├── tools.py              # 工具定義
 │   ├── prompts.py            # 系統提示詞
-│   ├── utils.py              # 驗證、重試、上下文管理
-│   ├── nodes.py              # LangGraph 節點
-│   └── agent.py              # Agent 工廠
-├── agent.py                   # 主程式入口
+│   ├── utils.py             # 驗證、重試、上下文管理
+│   ├── nodes.py             # LangGraph 節點
+│   └── agent.py             # Agent 工廠
+├── api/                       # FastAPI 後端
+│   ├── __init__.py
+│   ├── main.py              # FastAPI 應用
+│   ├── routes.py            # API 路由
+│   ├── services.py          # 服務層
+│   ├── models.py            # Pydantic 模型
+│   └── database.py          # MongoDB 連接
+├── frontend/                  # Vue.js 前端
+│   ├── index.html
+│   └── src/
+│       ├── app.js           # 主應用邏輯
+│       ├── api.js           # API 客戶端
+│       ├── components.js    # UI 組件
+│       ├── styles.css       # 樣式
+│       └── config.js        # 配置
+├── agent.py                   # CLI 主程式
+├── run_api.py                # API 伺服器啟動
+├── evaluate_api.py           # 評估腳本
 ├── requirements.txt           # 依賴列表
-├── .env                      # 環境變量 (需要自行創建)
 ├── .env.example              # 環境變量模板
 └── README.md                 # 說明文檔
 ```
 
-## 安裝
+## 快速開始
+
+### 1. 安裝依賴
 
 ```bash
-# 激活虛擬環境
-source venv/bin/activate
-
-# 安裝依賴
 pip install -r requirements.txt
-
-# 確保 Ollama 服務運行
-ollama serve
-
-# 下載模型（如果還沒有的話）
-ollama pull qwen3.5:9b
 ```
 
-## 環境變量
-
-在 `.env` 文件中設置以下變量：
+### 2. 環境變量
 
 ```bash
-# 複製模板
 cp .env.example .env
+```
 
-# 編輯 .env 文件:
+編輯 `.env` 文件:
+```bash
+# OpenWeather API (用於天氣查詢)
+OPEN_WEATHER_API_KEY=your_openweather_api_key
+
 # LangSmith 調試 (可選)
 LANGCHAIN_API_KEY=your_langsmith_api_key
 LANGCHAIN_TRACING_V2=true
 
-# OpenWeather API (用於天氣查詢)
-OPEN_WEATHER_API_KEY=your_openweather_api_key
+# MongoDB (可選，使用本地訊息儲存)
+MONGODB_URI=mongodb://localhost:27017
 ```
 
-## 運行
+### 3. 啟動服務
 
 ```bash
-python agent.py
+# 確保 Ollama 服務運行
+ollama serve
+
+# 下載模型
+ollama pull qwen3.5:9b
+
+# 啟動 API 伺服器
+python run_api.py
+
+# 啟動前端 (新終端)
+cd frontend
+python -m http.server 8080
 ```
+
+訪問 `http://localhost:8080`
+
+## API 端點
+
+| 端點 | 方法 | 描述 |
+|------|------|------|
+| `/api/agent/chat` | POST | LangGraph Agent 對話 (SSE 流式) |
+| `/api/chat` | POST | 簡單對話 (非 Agent) |
+| `/api/models` | GET | 獲取可用模型列表 |
+| `/api/token-count` | GET | 獲取上下文 token 使用量 |
+| `/api/chat/clear` | POST | 清除對話上下文 |
+| `/api/model/set` | POST | 設置默認模型 |
+| `/api/model/current` | GET | 獲取當前模型 |
 
 ## 功能
 
-1. **天氣搜索** (`get_weather`)
-   - 使用 OpenWeather API 獲取即時天氣數據
-   - 支援全球城市 (使用英文名稱，如 "Taipei", "Tokyo")
+### 1. 天氣搜索 (`get_weather`)
+- 使用 OpenWeather API
+- 支援全球城市 (英文名稱)
 
-2. **數學計算** (`calculate`)
-   - 支援基本運算：+、-、*、/、**
-   - 支援函數：sqrt、sin、cos、tan、log、pi、e
+### 2. 數學計算 (`calculate`)
+- 基本運算：+、-、*、/、**
+- 函數：sqrt、sin、cos、tan、log
 
-3. **網絡搜索** (`web_search`)
-   - 使用 DuckDuckGo 免費 API
-   - 搜尋最新資訊、新聞、價格等
-   - ⚠️ 搜尋結果取決於 DuckDuckGo 服務供應商
+### 3. 網絡搜索 (`web_search`)
+- 使用 DuckDuckGo API
 
-4. **獲取時間** (`get_current_time`)
-   - 支援時區查詢
-   - 預設 UTC 時間
+### 4. 獲取時間 (`get_current_time`)
+- 支援時區查詢
 
-## 模組說明
+### 5. Deep Reasoning
+- 任務分析與分解
+- 工具規劃
 
-### src/tools.py
-- `get_weather(city)`: 獲取城市天氣
-- `calculate(expression)`: 數學計算
-- `web_search(query)`: 網絡搜索
-- `get_current_time(timezone)`: 獲取時間
-
-### src/prompts.py
-- `AGENT_SYSTEM_PROMPT`: Agent 系統提示
-- `DEEP_REASONING_SYSTEM_PROMPT`: 深度推理提示
-
-### src/utils.py
-- `validate_and_parse_output()`: 輸出驗證
-- `agent_execute_with_retry()`: 智能重試
-- `manage_context_window()`: 上下文管理
-
-### src/nodes.py
-- `call_model()`: LLM 調用節點
-- `deep_reasoning()`: 深度推理節點
-- `should_continue()`: 條件邊判斷
-
-### src/agent.py
-- `create_agent()`: 創建 LangGraph Agent
-- `stream_agent_response()`: 流式輸出
+### 6. 評估系統
+- LLM 自評估
+- 多維度指標追蹤
 
 ## Agent 架構
-
-### 節點說明
-
-1. **Deep Reasoning 節點**
-   - 在主要工具調用前執行
-   - 分析用戶請求並分解為子任務
-   - 識別需要的工具
-   - 制定執行計劃
-
-2. **Agent 節點**
-   - 負責決定是否調用工具
-   - 每次只調用一個工具
-   - 使用 system prompt 控制行為
-
-3. **Tools 節點**
-   - 執行工具並返回結果
-
-### 工作流程
 
 ```
 User Query
@@ -153,13 +145,11 @@ User Query
 │         Deep Reasoning 節點             │
 │  - 任務分析                              │
 │  - 工具規劃                              │
-│  - 執行計劃                              │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
 │           Agent 節點                     │
 │  - 決定是否調用工具                      │
-│  - 一次只調用一個工具                    │
 │  - 推理過程                              │
 └─────────────────────────────────────────┘
     ↓
@@ -168,7 +158,7 @@ User Query
  需要工具    結束
     ↓
 ┌─────────────────────────────────────────┐
-│          Tools 節點                       │
+│          Tools 節點                      │
 │  - get_weather                          │
 │  - calculate                            │
 │  - web_search                           │
@@ -177,54 +167,40 @@ User Query
     回到 Agent 節點 (循環)
 ```
 
-## 輸出示例
+## 評估系統
 
+### 運行評估
+
+```bash
+python evaluate_api.py
 ```
-🚀 LangGraph Agent - 天氣搜索 + 計算工具 + 網絡搜索
-===========================================================
 
-測試 1: 香港現在的天氣如何？
-===========================================================
+### 評估指標
 
-🔄 ReAct 推理過程:
-----------------------------------------
+- **準確性 (Accuracy)**: 回覆是否正確回答問題
+- **完整性 (Completeness)**: 是否包含所有必要資訊
+- **工具使用 (Tool Usage)**: 是否正確使用工具
+- **意圖識別 (Intent Recognition)**: 是否正確理解用戶意圖
 
-🧠 [Deep Reasoning]
-   ### 任務分析
-   用戶詢問香港的天氣狀況...
-   
-   ### 所需工具
-   - get_weather: 獲取即時天氣資訊
-   
-   ### 執行計劃
-   1. 調用 get_weather 工具
+## LangSmith 調試
 
-💭 [Thought]
-   用戶想要知道香港的天氣，我需要使用 get_weather 工具來獲取天氣資訊。
-
-🔧 [Action]
-   工具: get_weather
-   參數: {'city': 'Hong Kong'}
-
-👁️ [Observation]
-   🌡️ Hong Kong 天氣資訊:
-   天氣：few clouds
-   溫度：24°C (體感 26°C)
-   濕度：69%
-   風速：4.6 m/s
-
-----------------------------------------
-
-✅ Agent 回應:
-   香港目前的天氣是...
-```
+1. 在 [LangSmith](https://smith.langchain.com/) 創建帳戶
+2. 獲取 API Key
+3. 在 `.env` 中設置:
+   ```
+   LANGCHAIN_API_KEY=your_key
+   LANGCHAIN_TRACING_V2=true
+   LANGCHAIN_PROJECT=langgraph-agent
+   ```
+4. 訪問 LangSmith Dashboard 查看追蹤
 
 ## 學習重點
 
 1. **LangGraph 基礎**: 狀態機、節點、邊
-2. **Tool Calling**: 讓 Agent 調用外部函數
+2. **Tool Calling**: 外部函數調用
 3. **ReAct 模式**: Reasoning + Acting
 4. **Deep Reasoning**: 任務分解與規劃
-5. **狀態管理**: 多輪對話的狀態保持
-6. **System Prompt**: 控制 LLM 行為
-7. **模組化設計**: 代碼組織與重用
+5. **FastAPI**: REST API 開發
+6. **SSE**: 服務端推送
+7. **MongoDB**: 數據持久化
+8. **評估系統**: LLM 自評估
