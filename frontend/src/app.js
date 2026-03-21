@@ -29,6 +29,9 @@ class ChatApp {
     this.threads = [];
     this.currentThreadId = null;
     
+    // Sidebar state
+    this.sidebarVisible = true;
+    
     // DOM Elements
     this.app = document.getElementById('app');
     this.chatContainer = null;
@@ -36,6 +39,7 @@ class ChatApp {
     this.inputElement = null;
     this.sendButton = null;
     this.sidebarElement = null;
+    this.sidebarToggle = null;
     
     // Bind methods
     this.handleSend = this.handleSend.bind(this);
@@ -44,8 +48,30 @@ class ChatApp {
     this.handleThreadClick = this.handleThreadClick.bind(this);
     this.handleNewChat = this.handleNewChat.bind(this);
     this.handleThreadDelete = this.handleThreadDelete.bind(this);
+    this.handleSidebarToggle = this.handleSidebarToggle.bind(this);
     
     this.init();
+  }
+  
+  /**
+   * Toggle sidebar visibility
+   */
+  handleSidebarToggle() {
+    this.sidebarVisible = !this.sidebarVisible;
+    this.updateSidebarVisibility();
+  }
+  
+  /**
+   * Update sidebar visibility based on state
+   */
+  updateSidebarVisibility() {
+    if (!this.sidebarElement) return;
+    
+    if (this.sidebarVisible) {
+      this.sidebarElement.classList.remove('sidebar-hidden');
+    } else {
+      this.sidebarElement.classList.add('sidebar-hidden');
+    }
   }
   
   /**
@@ -206,9 +232,13 @@ class ChatApp {
     this.sidebarElement = this.app.querySelector('.sidebar-container');
     this.inputElement = this.app.querySelector('.chat-input');
     this.sendButton = this.app.querySelector('.send-button');
+    this.sidebarToggle = this.app.querySelector('#sidebar-toggle');
     
     // Render sidebar
     this.renderSidebar();
+    
+    // Set initial sidebar visibility
+    this.updateSidebarVisibility();
     
     // Bind scroll handler
     this.chatContainer?.addEventListener('scroll', this.handleScroll);
@@ -232,6 +262,7 @@ class ChatApp {
   bindEvents() {    
     this.sendButton?.addEventListener('click', this.handleSend);
     this.inputElement?.addEventListener('keydown', this.handleKeyDown);
+    this.sidebarToggle?.addEventListener('click', this.handleSidebarToggle);
     
     // Bind click events for chat messages and sidebar, but only once
     if (!this.eventsBound) {
@@ -268,6 +299,7 @@ class ChatApp {
         if (threadItem && !e.target.closest('.thread-delete')) {
           const threadId = threadItem.dataset.threadId;
           this.handleThreadClick(threadId);
+          this.handleSidebarToggle();
           return;
         }
         

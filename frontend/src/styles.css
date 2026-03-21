@@ -65,11 +65,13 @@ body {
   color: var(--color-text-primary);
   line-height: 1.5;
   height: 100vh;
+  height: 100dvh; /* Dynamic viewport height for mobile browsers */
   overflow: hidden;
 }
 
 #app {
   height: 100vh;
+  height: 100dvh; /* Dynamic viewport height for mobile browsers */
   display: flex;
   flex-direction: column;
 }
@@ -81,7 +83,6 @@ body {
 }
 
 .sidebar-container {
-  width: 260px;
   flex-shrink: 0;
 }
 
@@ -231,6 +232,37 @@ body {
   font-size: 16px;
   font-weight: 600;
   color: var(--color-text-primary);
+}
+
+/* Sidebar toggle button - hidden on desktop, visible on mobile */
+.sidebar-toggle {
+  display: none;
+  position: absolute;
+  left: 16px;
+  background: none;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-normal);
+}
+
+/* Show toggle button on mobile */
+@media (max-width: 768px) {
+  .sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.sidebar-toggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.sidebar-toggle svg {
+  display: block;
 }
 
 /* ========================================
@@ -628,4 +660,86 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.2);
+}
+
+/* ========================================
+   Responsive: Mobile Sidebar
+   ======================================== */
+
+/* Sidebar hidden state */
+.sidebar-container.sidebar-hidden {
+  display: none;
+}
+
+/* Make sidebar fully scrollable within its container */
+.sidebar-container {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Desktop: always show sidebar with fixed width, hide toggle */
+@media (min-width: 769px) {
+  .sidebar-container {
+    width: 260px;
+  }
+  .sidebar-toggle {
+    display: none;
+  }
+}
+
+/* Responsive: Tablet and smaller */
+@media (max-width: 768px) {
+  .header {
+    justify-content: flex-start;
+    padding-left: 48px;
+  }
+  
+  .sidebar-container {
+    position: fixed;
+    top: 62px;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 100;
+    background: var(--color-bg-primary);
+    border-right: 1px solid var(--color-border);
+    transform: translateX(0);
+    transition: transform 0.3s ease;
+  }
+  
+  .sidebar-container.sidebar-hidden {
+    transform: translateX(-100%);
+    display: flex;
+  }
+  
+  .main-layout {
+    position: relative;
+  }
+  
+  .chat-container {
+    width: 100%;
+  }
+}
+
+/* Responsive: Small mobile */
+@media (max-width: 480px) {
+  .sidebar-container {
+    width: 100%;
+    max-width: 100%;
+  }
+  
+  .header__title {
+    font-size: 14px;
+  }
+  
+  .chat-messages {
+    padding: 0 var(--space-md);
+  }
 }

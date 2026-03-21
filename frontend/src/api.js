@@ -3,7 +3,9 @@
  * Handles communication with the LangGraph Agent API
  */
 
-const API_BASE = 'http://localhost:8000/api';
+import { config } from './config.js';
+
+const API_BASE = `${config.API_BASE}/api`;
 
 /**
  * Send a chat message and receive streaming response
