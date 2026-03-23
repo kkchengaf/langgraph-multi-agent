@@ -1,14 +1,9 @@
 /**
  * Frontend Configuration
  * 
- * This file configures the API endpoint for the LangGraph Agent.
- * 
  * FOR VERCEL DEPLOYMENT:
- * - Set VERCEL_PROD_URL to your Render backend URL
- * - Format: 'https://your-app.onrender.com'
- * 
- * FOR LOCAL DEVELOPMENT:
- * - Uses http://localhost:8000
+ * - Replace 'YOUR_VERCEL_API_URL' below with your API deployment URL
+ * - Example: 'https://your-api.vercel.app'
  */
 
 const getApiBase = () => {
@@ -19,15 +14,10 @@ const getApiBase = () => {
     return 'http://localhost:8000';
   }
   
-  // Production: use environment variable or default to same host
-  return window.ENV_API_URL || `https://your-render-app.onrender.com`;
+  // Production: Update this URL after deploying API to Vercel
+  return 'https://YOUR_VERCEL_API_URL.vercel.app';
 };
 
 export const config = {
   API_BASE: getApiBase()
 };
-
-// Expose ENV variable for Vercel
-if (typeof window !== 'undefined') {
-  window.ENV_API_URL = import.meta?.env?.VITE_API_URL || 'https://your-render-app.onrender.com';
-}
