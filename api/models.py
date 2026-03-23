@@ -24,6 +24,7 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = Field(default=0.7, description="生成溫度 (0-2)")
     stream: Optional[bool] = Field(default=True, description="是否啟用流式輸出")
     thread_id: Optional[str] = Field(default="default", description="對話線程 ID")
+    device_id: Optional[str] = Field(default=None, description="Device identifier for thread isolation")
 
 
 class TokenCountRequest(BaseModel):
@@ -96,6 +97,7 @@ class ThreadMessage(BaseModel):
 class ThreadCreate(BaseModel):
     """Thread creation request"""
     name: Optional[str] = Field(None, description="Thread name")
+    device_id: Optional[str] = Field(None, description="Device identifier for thread isolation")
 
 
 class ThreadResponse(BaseModel):

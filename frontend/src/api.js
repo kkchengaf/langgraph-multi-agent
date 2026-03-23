@@ -7,6 +7,19 @@ import { config } from './config.js';
 
 const API_BASE = `${config.API_BASE}/api`;
 
+// Generate or get device ID from localStorage
+function getDeviceId() {
+  let deviceId = localStorage.getItem('device_id');
+  if (!deviceId) {
+    // Generate a simple device ID based on random string
+    deviceId = 'device_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+    localStorage.setItem('device_id', deviceId);
+  }
+  return deviceId;
+}
+
+const DEVICE_ID = getDeviceId();
+
 /**
  * Send a chat message and receive streaming response
  * @param {string} message - The user's message
@@ -24,7 +37,8 @@ export async function sendChatMessage(message, model = 'qwen3.5:9b', threadId = 
     body: JSON.stringify({
       message,
       model,
-      thread_id: threadId
+      thread_id: threadId,
+      device_id: DEVICE_ID
     })
   });
 
@@ -133,7 +147,7 @@ export async function clearConversation(threadId = 'default') {
  * @returns {Promise<Array>}
  */
 export async function getThreads() {
-  const response = await fetch(`${API_BASE}/threads`);
+  const response = await fetch(`${API_BASE}/threads?device_id=${encodeURIComponent(DEVICE_ID)}`);
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
@@ -152,7 +166,7 @@ export async function createThread(name = null) {
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ name })
+    body: JSON.stringify({ name, device_id: DEVICE_ID })
   });
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
@@ -179,7 +193,7 @@ export async function getThread(threadId) {
  * @returns {Promise<void>}
  */
 export async function deleteThread(threadId) {
-  const response = await fetch(`${API_BASE}/threads/${threadId}`, {
+  const response = await fetch(`${API_BASE}/threads/${threadId}?device_id=${encodeURIComponent(DEVICE_ID)}`, {
     method: 'DELETE'
   });
   if (!response.ok) {
@@ -194,7 +208,7 @@ export async function deleteThread(threadId) {
  * @returns {Promise<Object>}
  */
 export async function updateThread(threadId, name) {
-  const response = await fetch(`${API_BASE}/threads/${threadId}`, {
+  const response = await fetch(`${API_BASE}/threads/${threadId}?device_id=${encodeURIComponent(DEVICE_ID)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json'

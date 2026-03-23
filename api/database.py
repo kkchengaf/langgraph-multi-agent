@@ -70,6 +70,7 @@ def init_indexes():
     # Threads indexes
     threads.create_index("created_at", background=True)
     threads.create_index("name")
+    threads.create_index("device_id", background=True)
     
     # Messages indexes
     messages.create_index("thread_id", background=True)

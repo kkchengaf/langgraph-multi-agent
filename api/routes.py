@@ -353,7 +353,8 @@ async def create_thread(request: ThreadCreate):
             "_id": thread_id,
             "name": request.name or f"Chat {now.strftime('%Y-%m-%d %H:%M')}",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
+            "device_id": request.device_id
         }
         
         threads.insert_one(thread_doc)
@@ -370,7 +371,7 @@ async def create_thread(request: ThreadCreate):
 
 
 @router.get("/threads", response_model=ThreadListResponse)
-async def list_threads():
+async def list_threads(device_id: Optional[str] = Query(default=None, description="Device ID to filter threads")):
     """
     Get all threads
     """
@@ -378,7 +379,12 @@ async def list_threads():
         threads = get_threads_collection()
         messages = get_messages_collection()
         
-        thread_docs = list(threads.find().sort("updated_at", -1))
+        # Filter by device_id if provided - include threads with matching device_id OR no device_id (backward compat)
+        if device_id:
+            query = {"$or": [{"device_id": device_id}, {"device_id": {"$exists": False}}]}
+        else:
+            query = {}
+        thread_docs = list(threads.find(query).sort("updated_at", -1))
         
         thread_responses = []
         for doc in thread_docs:
@@ -400,7 +406,7 @@ async def list_threads():
 
 
 @router.get("/threads/{thread_id}", response_model=ThreadMessageListResponse)
-async def get_thread(thread_id: str):
+async def get_thread(thread_id: str, device_id: Optional[str] = Query(default=None, description="Device ID for ownership verification")):
     """
     Get a specific thread with messages
     """
@@ -408,9 +414,15 @@ async def get_thread(thread_id: str):
         threads = get_threads_collection()
         messages = get_messages_collection()
         
-        thread_doc = threads.find_one({"_id": thread_id})
-        if not thread_doc:
-            raise HTTPException(status_code=404, detail="Thread not found")
+        # Verify ownership if device_id provided
+        if device_id:
+            thread_doc = threads.find_one({"_id": thread_id, "device_id": device_id})
+            if not thread_doc:
+                raise HTTPException(status_code=404, detail="Thread not found")
+        else:
+            thread_doc = threads.find_one({"_id": thread_id})
+            if not thread_doc:
+                raise HTTPException(status_code=404, detail="Thread not found")
         
         message_docs = list(messages.find({"thread_id": thread_id}).sort("created_at", 1))
         
@@ -427,7 +439,7 @@ async def get_thread(thread_id: str):
             id=thread_doc["_id"],
             name=thread_doc["name"],
             created_at=thread_doc["created_at"].isoformat() if hasattr(thread_doc["created_at"], 'isoformat') else str(thread_doc["created_at"]),
-            updated_at=thread_doc["updated_at"].isoformat() if hasattr(thread_doc["updated_at"], 'isoformat') else str(thread_doc["updated_at"]),
+            updated_at=thread_doc["updated_at"].isoformat() if hasattr(thread_doc["updated_at"], "isoformat") else str(thread_doc["updated_at"]),
             message_count=len(thread_messages),
             messages=thread_messages
         )
@@ -438,7 +450,7 @@ async def get_thread(thread_id: str):
 
 
 @router.delete("/threads/{thread_id}")
-async def delete_thread(thread_id: str):
+async def delete_thread(thread_id: str, device_id: Optional[str] = Query(default=None, description="Device ID for ownership verification")):
     """
     Delete a thread and its messages
     """
@@ -446,10 +458,15 @@ async def delete_thread(thread_id: str):
         threads = get_threads_collection()
         messages = get_messages_collection()
         
-        # Delete thread
-        result = threads.delete_one({"_id": thread_id})
-        if result.deleted_count == 0:
-            raise HTTPException(status_code=404, detail="Thread not found")
+        # Verify ownership if device_id provided
+        if device_id:
+            result = threads.delete_one({"_id": thread_id, "device_id": device_id})
+            if result.deleted_count == 0:
+                raise HTTPException(status_code=404, detail="Thread not found")
+        else:
+            result = threads.delete_one({"_id": thread_id})
+            if result.deleted_count == 0:
+                raise HTTPException(status_code=404, detail="Thread not found")
         
         # Delete all messages in thread
         messages.delete_many({"thread_id": thread_id})
@@ -462,12 +479,23 @@ async def delete_thread(thread_id: str):
 
 
 @router.put("/threads/{thread_id}", response_model=ThreadResponse)
-async def update_thread(thread_id: str, request: ThreadCreate):
+async def update_thread(thread_id: str, request: ThreadCreate, device_id: Optional[str] = Query(default=None, description="Device ID for ownership verification")):
     """
     Update thread name
     """
     try:
         threads = get_threads_collection()
+        messages = get_messages_collection()
+        
+        # Verify ownership
+        if device_id:
+            thread_doc = threads.find_one({"_id": thread_id, "device_id": device_id})
+            if not thread_doc:
+                raise HTTPException(status_code=404, detail="Thread not found")
+        else:
+            thread_doc = threads.find_one({"_id": thread_id})
+            if not thread_doc:
+                raise HTTPException(status_code=404, detail="Thread not found")
         
         now = datetime.utcnow()
         result = threads.update_one(
@@ -475,17 +503,16 @@ async def update_thread(thread_id: str, request: ThreadCreate):
             {"$set": {"name": request.name, "updated_at": now}}
         )
         
-        if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="Thread not found")
-        
         thread_doc = threads.find_one({"_id": thread_id})
+        
+        message_count = messages.count_documents({"thread_id": thread_id})
         
         return ThreadResponse(
             id=thread_id,
             name=thread_doc["name"],
             created_at=thread_doc["created_at"].isoformat() if hasattr(thread_doc["created_at"], 'isoformat') else str(thread_doc["created_at"]),
             updated_at=thread_doc["updated_at"].isoformat() if hasattr(thread_doc["updated_at"], 'isoformat') else str(thread_doc["updated_at"]),
-            message_count=0
+            message_count=message_count
         )
     except HTTPException:
         raise

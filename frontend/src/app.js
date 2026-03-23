@@ -299,7 +299,11 @@ class ChatApp {
         if (threadItem && !e.target.closest('.thread-delete')) {
           const threadId = threadItem.dataset.threadId;
           this.handleThreadClick(threadId);
-          this.handleSidebarToggle();
+          // Only toggle sidebar on mobile (where toggle button is visible)
+          // On desktop, sidebar is always visible
+          if (window.innerWidth <= 768) {
+            this.handleSidebarToggle();
+          }
           return;
         }
         
