@@ -15,7 +15,7 @@ const getApiBase = () => {
   }
   
   // Production: Update this URL after deploying API to Vercel
-  return 'https://YOUR_VERCEL_API_URL.vercel.app';
+  return 'https://langgraph-multi-agent-eosin.vercel.app';
 };
 
 export const config = {
