@@ -28,15 +28,15 @@ async def lifespan(app: FastAPI):
         print(f"\n⚠️ 警告: 無法連接 MongoDB: {e}")
         print("   請確保 MongoDB 服務正在運行")
     
-    # 檢查 Ollama 連接
+    # 檢查 OpenRouter 連接
     try:
         models = ollama_service.list_models()
-        print(f"\n✅ Ollama 連接成功! 找到 {len(models)} 個模型:")
+        print(f"\n✅ OpenRouter 連接成功! 可用模型:")
         for m in models:
             print(f"   - {m.get('name')}")
     except Exception as e:
-        print(f"\n⚠️ 警告: 無法連接 Ollama: {e}")
-        print("   請確保 Ollama 服務正在運行 (ollama serve)")
+        print(f"\n⚠️ 警告: 無法連接 OpenRouter: {e}")
+        print("   請確保 OPENROUTER_API_KEY 已設置")
     
     print("\n" + "=" * 50)
     print("📡 API 端點:")
@@ -112,13 +112,13 @@ async def health():
     """健康檢查"""
     try:
         models = ollama_service.list_models()
-        ollama_status = "connected" if models else "disconnected"
+        openrouter_status = "connected" if models else "disconnected"
     except:
-        ollama_status = "error"
+        openrouter_status = "error"
     
     return {
         "status": "healthy",
-        "ollama": ollama_status
+        "openrouter": openrouter_status
     }
 
 

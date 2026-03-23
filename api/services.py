@@ -3,9 +3,10 @@
 """
 import json
 import operator
+import os
 from typing import TypedDict, Annotated, Sequence, Optional, List, Dict, Any, Generator, AsyncGenerator
 from datetime import datetime
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.messages import BaseMessage
 from langgraph.graph import StateGraph, END
@@ -19,15 +20,16 @@ from api.database import get_threads_collection, get_messages_collection
 
 
 # ============================================
-# Ollama 服務
+# OpenRouter 服務
 # ============================================
 
-class OllamaService:
-    """Ollama LLM 服務類"""
+class OpenRouterService:
+    """OpenRouter LLM 服務類"""
     
-    def __init__(self, base_url: str = "http://localhost:11434"):
-        self.base_url = base_url
-        self._current_model = "llama3.2"
+    def __init__(self):
+        self.base_url = "https://openrouter.ai/api/v1"
+        self.api_key = os.getenv("OPENROUTER_API_KEY", "")
+        self._current_model = "minimax/minimax-m2.5:free"
         self._llm_instance = None
     
     @property
@@ -37,18 +39,18 @@ class OllamaService:
     def set_model(self, model: str) -> None:
         """設置當前使用的模型"""
         self._current_model = model
-        self._llm_instance = None  # 重置 LLM 實例
+        self._llm_instance = None
     
-    def get_llm(self, model: Optional[str] = None, **kwargs) -> ChatOllama:
+    def get_llm(self, model: Optional[str] = None, **kwargs) -> ChatOpenAI:
         """獲取 LLM 實例"""
         model = model or self._current_model
         
-        # 如果模型改變了，重置實例
         if self._llm_instance is None or self._current_model != model:
             self._current_model = model
-            self._llm_instance = ChatOllama(
+            self._llm_instance = ChatOpenAI(
                 model=model,
                 base_url=self.base_url,
+                api_key=self.api_key,
                 temperature=kwargs.get("temperature", 0.7),
                 max_tokens=kwargs.get("max_tokens", 2048),
                 streaming=kwargs.get("streaming", True),
@@ -57,36 +59,20 @@ class OllamaService:
         return self._llm_instance
     
     def list_models(self) -> List[Dict[str, Any]]:
-        """列出所有可用的 Ollama 模型"""
-        try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("models", [])
-        except Exception as e:
-            print(f"Error listing models: {e}")
-            return []
+        """列出可用的免費模型"""
+        return [
+            {"name": "minimax/minimax-m2.5:free"},
+        ]
     
     def get_model_info(self, model: str) -> Optional[Dict[str, Any]]:
-        """獲取特定模型的資訊"""
-        try:
-            response = requests.post(
-                f"{self.base_url}/api/show",
-                json={"name": model},
-                timeout=10
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            print(f"Error getting model info: {e}")
-            return None
+        return None
 
 
 # ============================================
 # 全域實例
 # ============================================
 
-ollama_service = OllamaService()
+ollama_service = OpenRouterService()
 
 
 # ============================================
@@ -246,15 +232,19 @@ def should_continue(state: AgentState) -> bool:
     return False
 
 
-def call_model(state: AgentState, model: str = "qwen3.5:9b"):
+def call_model(state: AgentState, model: str = "minimax/minimax-m2.5:free"):
     """
     調用 LLM 模型 (使用驗證、重試和上下文管理)
     """
     messages = state["messages"]
 
+    openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "")
+    
     # 初始化 LLM
-    llm = ChatOllama(
+    llm = ChatOpenAI(
         model=model,
+        base_url="https://openrouter.ai/api/v1",
+        api_key=openrouter_api_key,
         temperature=0.3,
     )
 
@@ -279,7 +269,7 @@ def call_model(state: AgentState, model: str = "qwen3.5:9b"):
     return {"messages": [response]}
 
 
-def deep_reasoning(state: AgentState, model: str = "qwen3.5:9b", max_retries: int = 3, min_response_length: int = 20):
+def deep_reasoning(state: AgentState, model: str = "minimax/minimax-m2.5:free", max_retries: int = 3, min_response_length: int = 20):
     """
     Deep Reasoning 節點：分析任務並分解為子任務
     
@@ -309,10 +299,14 @@ def deep_reasoning(state: AgentState, model: str = "qwen3.5:9b", max_retries: in
             if msg.content != user_query:  # 排除當前消息
                 user_history.append(msg.content)
     
+    openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "")
+    
     # 初始化 LLM (用於推理)
-    llm = ChatOllama(
+    llm = ChatOpenAI(
         model=model,
-        temperature=0.5,  # 較高的溫度以獲得更多樣化的推理
+        base_url="https://openrouter.ai/api/v1",
+        api_key=openrouter_api_key,
+        temperature=0.5,
     )
     
     # 根據是否有歷史選擇不同的 prompt
