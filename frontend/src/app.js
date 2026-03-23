@@ -439,7 +439,7 @@ class ChatApp {
     try {
       await sendChatMessage(
         message,
-        'qwen3.5:9b',
+        'stepfun/step-3.5-flash:free',
         this.currentThreadId || 'default',
         (data) => {
           console.log('Received event:', data);

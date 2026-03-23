@@ -23,12 +23,12 @@ const DEVICE_ID = getDeviceId();
 /**
  * Send a chat message and receive streaming response
  * @param {string} message - The user's message
- * @param {string} model - Model name (default: qwen3.5:9b)
+ * @param {string} model - Model name (default: stepfun/step-3.5-flash:free)
  * @param {string} threadId - Thread ID for conversation context
  * @param {function} onEvent - Callback for each streaming event
  * @returns {Promise<void>}
  */
-export async function sendChatMessage(message, model = 'qwen3.5:9b', threadId = 'default', onEvent = () => {}) {
+export async function sendChatMessage(message, model = 'stepfun/step-3.5-flash:free', threadId = 'default', onEvent = () => {}) {
   const response = await fetch(`${API_BASE}/agent/chat`, {
     method: 'POST',
     headers: {

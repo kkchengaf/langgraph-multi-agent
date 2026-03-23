@@ -193,13 +193,13 @@ async def agent_chat(request: ChatRequest):
     - 最終答案
     
     Args:
-        request: 聊天請求 (model 默認為 qwen3.5:9b)
+        request: 聊天請求 (model 默認為 stepfun/step-3.5-flash:free)
     
     Returns:
         SSE 流式輸出
     """
-    # 默認使用 qwen3.5:9b
-    model = request.model or "qwen3.5:9b"
+    # 默認使用 stepfun/step-3.5-flash:free
+    model = request.model or "stepfun/step-3.5-flash:free"
     
     return StreamingResponse(
         stream_agent_sse(request, model),

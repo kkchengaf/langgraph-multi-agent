@@ -29,7 +29,7 @@ class OpenRouterService:
     def __init__(self):
         self.base_url = "https://openrouter.ai/api/v1"
         self.api_key = os.getenv("OPENROUTER_API_KEY", "")
-        self._current_model = "minimax/minimax-m2.5:free"
+        self._current_model = "stepfun/step-3.5-flash:free"
         self._llm_instance = None
     
     @property
@@ -61,7 +61,7 @@ class OpenRouterService:
     def list_models(self) -> List[Dict[str, Any]]:
         """列出可用的免費模型"""
         return [
-            {"name": "minimax/minimax-m2.5:free"},
+            {"name": "stepfun/step-3.5-flash:free"},
         ]
     
     def get_model_info(self, model: str) -> Optional[Dict[str, Any]]:
@@ -232,7 +232,7 @@ def should_continue(state: AgentState) -> bool:
     return False
 
 
-def call_model(state: AgentState, model: str = "minimax/minimax-m2.5:free"):
+def call_model(state: AgentState, model: str = "stepfun/step-3.5-flash:free"):
     """
     調用 LLM 模型 (使用驗證、重試和上下文管理)
     """
@@ -269,7 +269,7 @@ def call_model(state: AgentState, model: str = "minimax/minimax-m2.5:free"):
     return {"messages": [response]}
 
 
-def deep_reasoning(state: AgentState, model: str = "minimax/minimax-m2.5:free", max_retries: int = 3, min_response_length: int = 20):
+def deep_reasoning(state: AgentState, model: str = "stepfun/step-3.5-flash:free", max_retries: int = 3, min_response_length: int = 20):
     """
     Deep Reasoning 節點：分析任務並分解為子任務
     
@@ -366,7 +366,7 @@ def deep_reasoning(state: AgentState, model: str = "minimax/minimax-m2.5:free", 
     return {"messages": [AIMessage(content=error_message)]}
 
 
-def create_agent(model: str = "qwen3.5:9b"):
+def create_agent(model: str = "stepfun/step-3.5-flash:free"):
     """
     創建 LangGraph Agent
 
@@ -421,7 +421,7 @@ def create_agent(model: str = "qwen3.5:9b"):
 
 async def stream_agent(
     message: str,
-    model: str = "qwen3.5:9b",
+    model: str = "stepfun/step-3.5-flash:free",
     thread_id: str = "default"
 ):
     """
@@ -429,7 +429,7 @@ async def stream_agent(
     
     Args:
         message: 用戶消息
-        model: 模型名稱 (默認: qwen3.5:9b)
+        model: 模型名稱 (默認: stepfun/step-3.5-flash:free)
         thread_id: 會話 ID
     
     Yields:
