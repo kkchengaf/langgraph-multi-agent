@@ -1,9 +1,0 @@
-{
-  "build": {
-    "pipfile": "Pipfile",
-    "pythonVersion": "3.11"
-  },
-  "routes": {
-    "/api/{path}": "api/main.py"
-  }
-}
