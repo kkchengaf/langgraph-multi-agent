@@ -24,13 +24,12 @@ from api.database import get_threads_collection, get_messages_collection
 # ============================================
 
 class OpenRouterService:
-    """OpenRouter LLM 服務類"""
+    """OpenRouter LLM 服務類 (Request-scoped for Serverless)"""
     
     def __init__(self):
         self.base_url = "https://openrouter.ai/api/v1"
         self.api_key = os.getenv("OPENROUTER_API_KEY", "")
         self._current_model = "stepfun/step-3.5-flash:free"
-        self._llm_instance = None
     
     @property
     def current_model(self) -> str:
@@ -39,24 +38,22 @@ class OpenRouterService:
     def set_model(self, model: str) -> None:
         """設置當前使用的模型"""
         self._current_model = model
-        self._llm_instance = None
     
     def get_llm(self, model: Optional[str] = None, **kwargs) -> ChatOpenAI:
-        """獲取 LLM 實例"""
+        """
+        獲取 LLM 實例 (每次創建新實例，避免 serverless 狀態問題)
+        """
         model = model or self._current_model
+        self._current_model = model
         
-        if self._llm_instance is None or self._current_model != model:
-            self._current_model = model
-            self._llm_instance = ChatOpenAI(
-                model=model,
-                base_url=self.base_url,
-                api_key=self.api_key,
-                temperature=kwargs.get("temperature", 0.7),
-                max_tokens=kwargs.get("max_tokens", 2048),
-                streaming=kwargs.get("streaming", True),
-            )
-        
-        return self._llm_instance
+        return ChatOpenAI(
+            model=model,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            temperature=kwargs.get("temperature", 0.7),
+            max_tokens=kwargs.get("max_tokens", 2048),
+            streaming=kwargs.get("streaming", True),
+        )
     
     def list_models(self) -> List[Dict[str, Any]]:
         """列出可用的免費模型"""
@@ -76,39 +73,38 @@ ollama_service = OpenRouterService()
 
 
 # ============================================
-# 對話上下文管理
+# 對話上下文管理 (Stateless for Serverless)
 # ============================================
 
 class ConversationContext:
-    """對話上下文管理類"""
+    """
+    對話上下文管理類 (Stateless)
+    
+    For serverless, we don't store anything in memory.
+    All data is loaded from and saved to MongoDB on each request.
+    """
     
     def __init__(self, max_tokens: int = MAX_TOKENS):
         self.max_tokens = max_tokens
-        self._sessions: Dict[str, List[Any]] = {}
     
     def get_messages(self, thread_id: str) -> List[Any]:
-        """獲取會話消息"""
-        return self._sessions.get(thread_id, [])
+        """從 MongoDB 獲取會話消息"""
+        return load_messages_from_db(thread_id)
     
     def add_message(self, thread_id: str, message: Any) -> None:
-        """添加消息到會話"""
-        if thread_id not in self._sessions:
-            self._sessions[thread_id] = []
-        self._sessions[thread_id].append(message)
+        """保存消息到 MongoDB"""
+        if hasattr(message, 'content'):
+            role = "assistant" if isinstance(message, AIMessage) else "user"
+            save_message_to_db(thread_id, role, message.content)
     
     def clear_session(self, thread_id: str) -> None:
-        """清除會話"""
-        # Clear in-memory session
-        if thread_id in self._sessions:
-            del self._sessions[thread_id]
-        
-        # Also clear MongoDB messages
+        """清除會話 (從 MongoDB)"""
         try:
             from api.database import get_messages_collection
             messages = get_messages_collection()
             messages.delete_many({"thread_id": thread_id})
         except Exception:
-            pass  # Ignore if MongoDB not available
+            pass
     
     def get_token_count(self, thread_id: str) -> int:
         """獲取會話的 token 數"""
@@ -116,14 +112,13 @@ class ConversationContext:
         return calculate_token_count(messages)
     
     def manage_context(self, thread_id: str) -> List[Any]:
-        """管理上下文窗口"""
+        """管理上下文窗口 (從 MongoDB 加載，處理後返回)"""
         messages = self.get_messages(thread_id)
         managed = manage_context_window(messages, self.max_tokens)
-        self._sessions[thread_id] = managed
         return managed
 
 
-# 全域對話上下文實例
+# 全域對話上下文實例 (stateless)
 conversation_context = ConversationContext()
 
 
@@ -165,13 +160,13 @@ def save_message_to_db(thread_id: str, role: str, content: str):
 
 def load_messages_from_db(thread_id: str):
     """
-    Load messages from MongoDB and populate conversation context
+    Load messages from MongoDB
     
     Args:
         thread_id: Thread ID
         
     Returns:
-        List of messages loaded
+        List of messages loaded as HumanMessage objects
     """
     try:
         messages = get_messages_collection()
@@ -183,13 +178,8 @@ def load_messages_from_db(thread_id: str):
         for doc in cursor:
             if doc.get("role") == "user":
                 loaded_messages.append(HumanMessage(content=doc.get("content", "")))            
-            #elif doc.get("role") == "assistant":
-            #    loaded_messages.append(AIMessage(content=doc.get("content", "")))
         
-        # Populate conversation context with loaded messages
-        if loaded_messages:
-            conversation_context._sessions[thread_id] = loaded_messages
-            print(f"Loaded {len(loaded_messages)} messages from DB for thread {thread_id}")
+        print(f"Loaded {len(loaded_messages)} messages from DB for thread {thread_id}")
         
         return loaded_messages
     except Exception as e:
@@ -201,9 +191,13 @@ def load_messages_from_db(thread_id: str):
 # LangGraph Agent
 # ============================================
 
-# 將 Tool 轉換為 ToolNode
+# 將 Tool 轉換為 ToolNode (stateless, OK for serverless)
 tool_node = ToolNode(TOOLS)
 
+
+# ============================================
+# Agent State & Functions
+# ============================================
 
 class AgentState(TypedDict):
     """Agent 的狀態類型"""
@@ -435,15 +429,8 @@ async def stream_agent(
     Yields:
         流式輸出事件
     """    
-    # Load messages from MongoDB if conversation context is empty
+    # Load messages from MongoDB (stateless)
     history_messages = conversation_context.get_messages(thread_id)
-    if not history_messages:
-        # Context is empty (e.g., after server restart), load from DB
-        history_messages = load_messages_from_db(thread_id)
-
-    # Save user message to MongoDB
-    # Save to database after loading history to avoid duplication in context
-    save_message_to_db(thread_id, "user", message)
     
     # 創建 Agent
     agent = create_agent(model)
@@ -581,8 +568,9 @@ def chat(
     # 綁定工具
     llm_with_tools = llm.bind_tools(TOOLS)
     
-    # 獲取並管理上下文
-    messages = conversation_context.manage_context(thread_id)
+    # 從 MongoDB 獲取並管理上下文 (stateless for serverless)
+    messages = load_messages_from_db(thread_id)
+    messages = manage_context_window(messages, MAX_TOKENS)
     
     # 系統提示
     if not messages or not isinstance(messages[0], SystemMessage):
@@ -602,9 +590,10 @@ def chat(
     # 計算 token
     token_count = estimate_tokens(content)
     
-    # 保存到上下文
-    conversation_context.add_message(thread_id, user_message)
-    conversation_context.add_message(thread_id, response)
+    # 保存到 MongoDB (stateless for serverless)
+    save_message_to_db(thread_id, "user", message)
+    if content:
+        save_message_to_db(thread_id, "assistant", content)
     
     return content, token_count
 
@@ -640,8 +629,9 @@ async def chat_stream(
     # 綁定工具
     llm_with_tools = llm.bind_tools(TOOLS)
     
-    # 獲取並管理上下文
-    messages = conversation_context.manage_context(thread_id)
+    # 從 MongoDB 獲取並管理上下文 (stateless for serverless)
+    messages = load_messages_from_db(thread_id)
+    messages = manage_context_window(messages, MAX_TOKENS)
     
     # 系統提示
     if not messages or not isinstance(messages[0], SystemMessage):
@@ -664,24 +654,26 @@ async def chat_stream(
     # 計算 token
     token_count = estimate_tokens(accumulated_content)
     
-    # 保存到上下文
-    conversation_context.add_message(thread_id, user_message)
-    ai_message = AIMessage(content=accumulated_content)
-    conversation_context.add_message(thread_id, ai_message)
+    # 保存到 MongoDB (stateless for serverless)
+    save_message_to_db(thread_id, "user", message)
+    if accumulated_content:
+        save_message_to_db(thread_id, "assistant", accumulated_content)
     
     # 發送完成信號
     yield f"[DONE:{token_count}]"
 
 
 def get_token_info(thread_id: str = "default") -> Dict[str, Any]:
-    """獲取當前上下文窗口的 token 資訊"""
-    current_tokens = conversation_context.get_token_count(thread_id)
-    max_tokens = conversation_context.max_tokens
+    """獲取當前上下文窗口的 token 資訊 (從 MongoDB)"""
+    # Load from MongoDB for stateless operation
+    messages = load_messages_from_db(thread_id)
+    current_tokens = calculate_token_count(messages)
+    max_tokens = MAX_TOKENS
     usage_percentage = (current_tokens / max_tokens * 100) if max_tokens > 0 else 0
     
     return {
         "total_tokens": current_tokens,
         "max_tokens": max_tokens,
         "usage_percentage": round(usage_percentage, 2),
-        "messages_count": len(conversation_context.get_messages(thread_id))
+        "messages_count": len(messages)
     }
