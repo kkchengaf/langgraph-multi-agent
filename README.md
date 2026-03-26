@@ -20,6 +20,11 @@ AI Agent System with LangGraph, FastAPI Backend, and Vue.js Frontend
 - **MongoDB**: 訊息與執行緒持久化
 - **Ollama**: 本地 LLM (qwen3.5:9b)
 
+## Demo
+https://github.com/user-attachments/assets/b32a93ea-ac0c-4a26-8133-150d95830da7
+
+
+
 ## 項目結構
 
 ```
